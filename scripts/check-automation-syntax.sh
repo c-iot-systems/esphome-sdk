@@ -36,12 +36,14 @@ read -r -d '' AWK_PROG <<'AWK' || true
 {
   raw = $0
   sub(/\r$/, "", raw)                        # tolerate CRLF
-  match(raw, /^[ ]*/); indent = RLENGTH
+  match(raw, /^[ ]*/); indent = RLENGTH      # raw leading spaces (YAML indent is spaces-only)
   trimmed = substr(raw, indent + 1)
   is_blank   = (trimmed ~ /^$/)
   is_comment = (trimmed ~ /^#/)
 
-  # Resolve a pending on_* key against its first real child line.
+  # Resolve a pending on_* key against its first real child line. key_indent is the COLUMN of the
+  # key name (past any leading "- " sequence marker), so a sibling in the same list-item mapping
+  # (indented to the marker's content, not deeper) is correctly seen as a dedent, not a child.
   if (pending) {
     if (is_blank || is_comment) { next }
     if (indent > key_indent) {
@@ -60,18 +62,39 @@ read -r -d '' AWK_PROG <<'AWK' || true
 
   if (is_blank || is_comment) { next }
 
-  # on_* key: classify the value that follows the colon.
-  if (match(trimmed, /^on_[a-z0-9_]+:/)) {
-    key_name = substr(trimmed, 1, RLENGTH - 1)   # drop the trailing colon
-    rest     = substr(trimmed, RLENGTH + 1)
-    sub(/^[ \t]+/, "", rest)                     # trim leading whitespace
-    sub(/^[&!][^ \t]+[ \t]*/, "", rest)          # strip a leading YAML anchor (&x) or tag (!x)
-    sub(/[ \t]*#.*$/, "", rest)                  # strip a trailing comment
+  # Normalize the line so every valid YAML spelling of an automation key is classified the same:
+  #   - a leading "- " sequence marker ( "- on_press:" puts the key on the list-item line )
+  #   - a single- or double-quoted key   ( "'on_press':" / '"on_press":' )
+  #   - whitespace before the colon       ( "on_error :" )
+  # key_col is the column where the key name starts, used as the child-indent baseline above.
+  keytext = trimmed
+  key_col = indent
+  if (match(keytext, /^-+[ \t]+/)) {           # one or more dashes then whitespace
+    key_col = indent + RLENGTH
+    keytext = substr(keytext, RLENGTH + 1)
+  }
+  q = ""
+  if (keytext ~ /^['"]/) { q = substr(keytext, 1, 1); keytext = substr(keytext, 2) }
+
+  # on_* key? (any automation-shaped name; deliberately not a fixed allow-list)
+  if (match(keytext, /^on_[a-z0-9_]+/)) {
+    key_name = substr(keytext, 1, RLENGTH)
+    after    = substr(keytext, RLENGTH + 1)
+    if (q != "") {
+      if (substr(after, 1, 1) != q) { next }   # opening quote never closed on the key -> not a key
+      after = substr(after, 2)
+    }
+    if (after !~ /^[ \t]*:/) { next }          # no mapping colon -> a scalar like `on_foo` in a value
+    sub(/^[ \t]*:/, "", after)                 # drop optional whitespace and the colon
+    rest = after
+    sub(/^[ \t]+/, "", rest)                   # trim leading whitespace
+    sub(/^[&!][^ \t]+[ \t]*/, "", rest)        # strip a leading YAML anchor (&x) or tag (!x)
+    sub(/[ \t]*#.*$/, "", rest)                # strip a trailing comment
     sub(/[ \t]+$/, "", rest)
 
     if (rest == "") {
       # nothing (or only an anchor/tag) after the key -> block form, inspect its child next.
-      key_indent = indent
+      key_indent = key_col
       key_line   = NR
       pending    = 1
       next
@@ -208,6 +231,76 @@ YAML
     echo "self-test: PASS on bad fixture (anchored mapping form rejected) — ok"
   fi
   rm -f "$tmp/modules/bad_anchor.yaml"
+
+  # BAD fixture: whitespace before the colon ( on_error : ) still a mapping-form key.
+  cat >"$tmp/modules/bad_spaced.yaml" <<'YAML'
+component:
+  on_error :
+    priority: 600
+    then:
+      - logger.log: nope
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — spaced-colon mapping form was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (spaced-colon mapping form rejected) — ok"
+  fi
+  rm -f "$tmp/modules/bad_spaced.yaml"
+
+  # BAD fixture: a quoted key ( "on_press": ) in mapping form.
+  cat >"$tmp/modules/bad_quoted.yaml" <<'YAML'
+component:
+  "on_press":
+    priority: 600
+    then:
+      - logger.log: nope
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — quoted-key mapping form was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (quoted-key mapping form rejected) — ok"
+  fi
+  rm -f "$tmp/modules/bad_quoted.yaml"
+
+  # BAD fixture: the key shares the list-item line ( - on_press: ) with a mapping child.
+  cat >"$tmp/modules/bad_listitem.yaml" <<'YAML'
+binary_sensor:
+  - platform: gpio
+    triggers:
+      - on_press:
+          priority: 600
+          then:
+            - logger.log: nope
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — list-item mapping form was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (list-item mapping form rejected) — ok"
+  fi
+  rm -f "$tmp/modules/bad_listitem.yaml"
+
+  # GOOD fixture: the same quoted and list-item spellings in the SEQUENCE form must pass.
+  cat >"$tmp/modules/good_spellings.yaml" <<'YAML'
+component:
+  "on_press":
+    - then:
+        - logger.log: ok
+  on_error :
+    - then:
+        - logger.log: ok
+switches:
+  - platform: gpio
+    triggers:
+      - on_press:
+          - then:
+              - logger.log: ok
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: PASS on good fixture (quoted/spaced/list-item sequence form accepted) — ok"
+  else
+    echo "self-test: FAILED — good quoted/spaced/list-item sequence form was rejected"; rc=1
+  fi
+  rm -f "$tmp/modules/good_spellings.yaml"
 
   rm -rf "$tmp"
   return "$rc"
