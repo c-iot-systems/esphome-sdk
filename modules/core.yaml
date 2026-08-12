@@ -18,7 +18,7 @@
 #   | device_name          | yes      | —       | core.yaml          | node name; MQTT topic prefix |
 #   | firmware_version     | yes      | —       | core.yaml          | published as a text sensor   |
 #   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
-#   | logger_level         | no       | INFO    | core.yaml          |                              |
+#   | logger_level         | no       | NONE    | core.yaml          | prod-off; raise deliberately |
 #   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
 #   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
 #   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
@@ -61,8 +61,13 @@
 #     error), so `esphome config` exits non-zero with the offending expression — which names the
 #     variable — in the message. tests/negative/ proves each case.
 
+# logger_level defaults to NONE — the production posture. Legacy's ESPHome baseline is
+# LOGGER_LEVEL: "NONE" (config/frameworks/esphome/framework_config.json), raised only by opting into
+# a named environment (config/environments.json: info/debug/verbose/veryverbose). Parity means the
+# default ships silent and a consumer raises it DELIBERATELY per device — logger_level: INFO (or
+# DEBUG/VERBOSE/VERY_VERBOSE) — never the SDK shipping every device chatty by default.
 substitutions:
-  logger_level: INFO
+  logger_level: NONE
 
 esphome:
   name: ${device_name}
