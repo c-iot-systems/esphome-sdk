@@ -28,8 +28,17 @@
 # overrides ota_http_server_test. No new credential and no new required input are introduced.
 #
 # ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
-# The HARDWARE_FREEZER LED hooks in the legacy OTA on_begin / on_progress handlers are gone: a
+# The legacy freezer-hardware LED hooks in the OTA on_begin / on_progress handlers are gone: a
 # hardware file owns its own OTA visual feedback; no shared module reaches into hardware ids.
+#
+# ── Removed: the "Secret OTA" recovery entity (deliberately NOT ported) ─────────────────────────
+# The legacy config carried a second writable text entity ("Secret OTA") that fed an
+# attacker-controllable prefix straight into ota.http_request.flash with a hardcoded blob suffix. It
+# bypassed BOTH the ota_http_server host and the ${device_name}_ guard below, so any actor able to
+# publish that MQTT command could flash arbitrary firmware from an arbitrary host. It is absent from
+# this task's acceptance ownership list and directly defeats the device-name guard that IS an
+# acceptance criterion, so it is intentionally not carried forward. perform_ota_update (guarded) is
+# the only OTA-trigger path.
 
 substitutions:
   ota_attempts: "5"
@@ -106,19 +115,6 @@ text:
             return std::string("https://") +
                    (is_test ? "${ ota_http_server_test if ota_http_server_test is defined else 1/0 }"
                             : "${ ota_http_server if ota_http_server is defined else 1/0 }");
-
-  - platform: template
-    name: "Secret OTA"
-    id: ota_secret_ota
-    optimistic: true
-    min_length: 0
-    max_length: 255
-    mode: text
-    on_value:
-      - delay: 1s  # Wait for MQTT to publish the text response
-      - ota.http_request.flash:
-          md5_url: !lambda 'return x + "61c36f469f.bin.md5";'
-          url: !lambda 'return x + "61c36f469f.bin";'
 
 text_sensor:
   - platform: template
