@@ -147,7 +147,7 @@ esphome-sdk/
   hardware/                     # hds_v1_0, hds_v1_1, hds_v2_0
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
-  scripts/                      # CI check scripts (automation-syntax, sdk-ref)
+  scripts/                      # CI check scripts (automation-syntax, sdk-ref, offline-survival)
   .github/workflows/            # validate (PR) and release (tag) CI
 ```
 
@@ -155,8 +155,9 @@ esphome-sdk/
 
 - **`validate.yml`** runs on every pull request: it materializes the PR head SHA into each validate
   config's package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs
-  the `check-automation-syntax.sh` and `check-sdk-ref.sh` gates. This validates the *revision under
-  test*, never a published tag.
+  the `check-automation-syntax.sh`, `check-sdk-ref.sh` and `check-offline-survival.sh` gates (the
+  last fails the build if any `reboot_timeout` default under `modules/`/`hardware/` is non-zero — the
+  offline-survival invariant). This validates the *revision under test*, never a published tag.
 - **`release.yml`** runs on a version tag: it materializes `GITHUB_REF_NAME`, asserts every fixture
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.
