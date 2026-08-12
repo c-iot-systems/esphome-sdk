@@ -96,6 +96,14 @@ scan_file() {
 # the SDK-1 scaffold, which has no modules at all) has nothing to pin and is vacuously ok.
 CONNECTIVITY_COMPONENTS="wifi mqtt"
 
+# True iff $1 has a reboot_timeout mapping key on a NON-comment line. A raw text match would count a
+# commented-out key (`# reboot_timeout: ${x}`) as present, letting someone disable the key while the
+# presence check still passes and ESPHome restores its 15min stock default. Excluding comment lines
+# closes that bypass: the key must be a live mapping entry.
+_has_active_reboot_timeout() {
+  grep -E '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$1" 2>/dev/null | grep -qvE '^[[:space:]]*#'
+}
+
 # Scan ROOT/modules and ROOT/hardware. Enforces BOTH: (a) every reboot_timeout key resolves to a
 # zero default, and (b) every declared connectivity component wires a reboot_timeout key. Zero of
 # both across the tree is a vacuous PASS; the self-test proves each FAIL path so this is no silent
@@ -111,13 +119,14 @@ scan_root() {
         found=1
         scan_file "$f" || rc=1
       fi
-      # (b) a file declaring a connectivity component MUST wire a reboot_timeout — closes the
-      #     "delete the key -> inherit the 15min stock default -> gate goes blind" bypass.
+      # (b) a file declaring a connectivity component MUST wire an ACTIVE reboot_timeout — closes the
+      #     "delete (or comment out) the key -> inherit the 15min stock default -> gate goes blind"
+      #     bypass. Uses _has_active_reboot_timeout so a commented-out key does not count as present.
       for comp in $CONNECTIVITY_COMPONENTS; do
         if grep -qE "^${comp}:([[:space:]]|$)" "$f" 2>/dev/null; then
           found=1
-          if ! grep -qE '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$f" 2>/dev/null; then
-            echo "check-offline-survival: FAIL — ${f}: declares '${comp}:' but wires no reboot_timeout — it would inherit ESPHome's non-zero stock default (15min)"
+          if ! _has_active_reboot_timeout "$f"; then
+            echo "check-offline-survival: FAIL — ${f}: declares '${comp}:' but wires no active reboot_timeout — it would inherit ESPHome's non-zero stock default (15min)"
             rc=1
           fi
         fi
@@ -213,6 +222,21 @@ YAML
     echo "self-test: FAILED — a wifi: component with no reboot_timeout was NOT rejected"; rc=1
   else
     echo "self-test: PASS on bad tree (connectivity component missing reboot_timeout rejected) — ok"
+  fi
+
+  # BAD 6: a connectivity component whose reboot_timeout is COMMENTED OUT. A raw text match would
+  # count it as present; the active-key check must still reject it.
+  cat >"$tmp/modules/wifi.yaml" <<'YAML'
+substitutions:
+  wifi_reboot_timeout: 0s
+wifi:
+  ssid: x
+  # reboot_timeout: ${wifi_reboot_timeout}
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — a wifi: component with only a COMMENTED reboot_timeout was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad tree (commented-out reboot_timeout rejected) — ok"
   fi
 
   rm -rf "$tmp"
