@@ -1,0 +1,58 @@
+# Positive validate fixture for the phone optional-hardware module.
+#
+# Imports core.yaml + phone.yaml at the REVISION UNDER TEST (CI materializes __SDK_REF__ — see
+# tests/validate/README.md), supplies an inline esp32 hardware stub, and instantiates `phone:` as a
+# 4x3 telephone keypad. The number of keys must equal rows * columns (the component's check_keys
+# validator), so a 4-row x 3-column matrix carries the 12-key layout below. Release CI compiles this
+# fixture for real, so the driver's C++ is built at least once per release.
+#
+# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential.
+substitutions:
+  device_name: phone-testdev
+  firmware_version: "0.0.0-test"
+
+# Inline hardware stub — this optional module owns no hardware platform, so the fixture supplies it.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Instantiate the driver as a 4x3 matrix keypad. Rows are driven outputs, columns are read inputs;
+# a real device wires its own pins (native GPIO or a tca8418 expander pin) and adds hook sensor /
+# passwords as needed.
+phone:
+  - id: prop_phone
+    rows:
+      - pin: GPIO4
+      - pin: GPIO5
+      - pin: GPIO18
+      - pin: GPIO19
+    columns:
+      - pin:
+          number: GPIO21
+          mode:
+            input: true
+            pullup: true
+      - pin:
+          number: GPIO22
+          mode:
+            input: true
+            pullup: true
+      - pin:
+          number: GPIO23
+          mode:
+            input: true
+            pullup: true
+    keys: "123456789*0#"
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/phone.yaml
+        vars: {sdk_ref: __SDK_REF__}

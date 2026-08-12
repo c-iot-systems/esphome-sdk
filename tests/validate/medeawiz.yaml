@@ -1,0 +1,43 @@
+# Positive validate fixture for the medeawiz optional-hardware module.
+#
+# Imports core.yaml + medeawiz.yaml at the REVISION UNDER TEST (CI materializes __SDK_REF__ — see
+# tests/validate/README.md), supplies an inline esp32 hardware stub and a uart bus with a tx pin
+# (the Sprite receives commands on tx; medeawiz DEPENDS on uart and its FINAL_VALIDATE_SCHEMA
+# requires a tx pin), and instantiates `medeawiz:`. Release CI compiles this fixture for real, so the
+# driver's C++ is built at least once per release.
+#
+# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential.
+substitutions:
+  device_name: medeawiz-testdev
+  firmware_version: "0.0.0-test"
+
+# Inline hardware stub — this optional module owns no hardware platform, so the fixture supplies it.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# The Sprite is driven over TTL serial; 9600 8N1 is the Sprite's factory default.
+uart:
+  - id: sprite_uart
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+    baud_rate: 9600
+
+# Instantiate the driver on that bus. Real devices set the address/feedback/automations they need;
+# this stub is what forces the component to compile.
+medeawiz:
+  - id: video_player
+    uart_id: sprite_uart
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/medeawiz.yaml
+        vars: {sdk_ref: __SDK_REF__}

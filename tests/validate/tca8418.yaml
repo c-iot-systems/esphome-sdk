@@ -1,0 +1,56 @@
+# Positive validate fixture for the tca8418 optional-hardware module.
+#
+# Imports core.yaml + tca8418.yaml at the REVISION UNDER TEST (CI materializes the __SDK_REF__
+# placeholder into the PR head SHA / release tag — see tests/validate/README.md), supplies an inline
+# esp32 hardware stub and an i2c bus, instantiates the expander, and — critically — CONSUMES a
+# TCA8418GPIOPin on a binary_sensor. `esphome config` only validates Python/schema, but release CI
+# runs a real `esphome compile` over this fixture; a fixture that merely declared the `tca8418:`
+# component without using one of its pins would never compile the TCA8418GPIOPin implementation, so
+# a broken pin class could ship unnoticed. The binary_sensor below forces that path to build.
+#
+# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential.
+substitutions:
+  device_name: tca8418-testdev
+  firmware_version: "0.0.0-test"
+
+# Inline hardware stub — this optional module owns no hardware platform, so the fixture supplies it.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# The expander is an I2C device (default address 0x34); tca8418 DEPENDS on i2c.
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+
+# Instantiate the expander. In a real device this lives in the private config, with the board's
+# concrete address; here it is the stub the pin below binds to.
+tca8418:
+  - id: pin_expander
+    address: 0x34
+
+# CONSUME a TCA8418GPIOPin so its implementation is compiled by release CI. Expander pin COL0 (8),
+# read as an active-low pushbutton to exercise input + pullup on the expander.
+binary_sensor:
+  - platform: gpio
+    name: "Expander button"
+    pin:
+      tca8418: pin_expander
+      number: 8
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/tca8418.yaml
+        vars: {sdk_ref: __SDK_REF__}
