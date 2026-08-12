@@ -76,6 +76,7 @@ the modules it imports.
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
 | `ota_attempts` | no | `5` | safe-mode attempts |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
+| `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `INFO` | |
 
 **No credential has a default.** A default password in a public repo is a default password in every
@@ -201,7 +202,13 @@ restructuring the others.
 - `criotive_mqtt.yaml` — mqtt client, topic prefix, birth / last-will / shutdown messages,
   `on_connect`.
 - `ota.yaml` — `safe_mode`, both OTA platforms, `http_request`, ota_status, `perform_ota_update`,
-  rollback script.
+  rollback script. `perform_ota_update` only flashes a binary whose name starts with
+  `${device_name}_` (a build for another device is rejected into an error state). It picks the
+  download host by detecting a `.test` token in the requested version name — routing test builds to
+  the optional `ota_http_server_test` (default `${ota_http_server}`) and everything else to the
+  required `ota_http_server`. `.test` is matched only as a whole dotted segment, because version
+  names are sorted and `.test` is not necessarily the last suffix. The rollback watchdog armed on
+  boot here is cancelled by `criotive_mqtt.yaml`'s `on_connect` once the broker is reached.
 - `diagnostics.yaml` — `debug` platform, device info, reset reason.
 - `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
 - `location.yaml` — `google_location` and its `external_components`.

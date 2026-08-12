@@ -1,0 +1,156 @@
+# ota.yaml — over-the-air updates: safe_mode, both OTA platforms, HTTP OTA, status, and rollback.
+#
+# Owns: `safe_mode`, the two OTA platforms (esphome + http_request), `http_request`, the ota_status
+# text sensor, the OTA-trigger text entities, the `perform_ota_update` script (with the device-name
+# guard) and the `script_rollback` rollback watchdog. Required input scoped to THIS module (see the
+# contract in core.yaml): importing ota.yaml makes ota_password and ota_http_server mandatory —
+# neither has a default. ota_attempts is the optional input this module owns.
+#
+# Required inputs use the guard idiom `${ x if x is defined else 1/0 }` (present -> the value;
+# missing -> a hard `esphome config` failure naming the variable). See core.yaml's header / the
+# README; tests/negative/ proves each omission fails.
+#
+# ── Rollback watchdog ─────────────────────────────────────────────────────────────────────────
+# on_boot arms `script_rollback`: a 300s timer that, on ESP-IDF, marks the running image invalid and
+# reboots to the previous one. criotive_mqtt.yaml's on_connect cancels that timer and marks the image
+# valid once the broker is reached — reaching MQTT is the health signal that a freshly-flashed build
+# works. The script lives HERE; the cancel lives in criotive_mqtt.yaml and references it by id. On
+# the Arduino framework there is no rollback API, so both halves are no-ops (matches the legacy).
+#
+# ── Test/prod OTA host selection ──────────────────────────────────────────────────────────────
+# The legacy chose between a PROD and an HMG (test) download host by detecting a `.test` token in the
+# requested version name — and `.test` is NOT necessarily the last suffix, because version names are
+# sorted (e.g. `v1.6.test.verbose`), so a naive endswith(".test") is wrong. That exact detection is
+# preserved below. The frozen substitution contract defines a single required OTA host,
+# `ota_http_server`; to keep the two-host selection without inventing a second REQUIRED input, the
+# test host is an OPTIONAL `ota_http_server_test` that DEFAULTS to ${ota_http_server}. A single-host
+# device therefore routes both branches to the same host; a deployment with a separate staging server
+# overrides ota_http_server_test. No new credential and no new required input are introduced.
+#
+# ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
+# The HARDWARE_FREEZER LED hooks in the legacy OTA on_begin / on_progress handlers are gone: a
+# hardware file owns its own OTA visual feedback; no shared module reaches into hardware ids.
+
+substitutions:
+  ota_attempts: "5"
+  # Optional test/staging OTA host; defaults to the single required prod host (see header).
+  ota_http_server_test: ${ota_http_server}
+
+safe_mode:
+  num_attempts: ${ota_attempts}
+
+esphome:
+  on_boot:
+    # Explicit list syntax. Arm the rollback watchdog as early as the other priority-600 boot work;
+    # criotive_mqtt.yaml's on_connect disarms it once the broker is reached.
+    - priority: 600
+      then:
+        - script.execute: script_rollback
+
+ota:
+  - platform: esphome
+    password: "${ ota_password if ota_password is defined else 1/0 }"
+
+  - platform: http_request
+    on_begin:
+      - text_sensor.template.publish:
+          id: ota_status
+          state: "OTA start"
+    on_progress:
+      - lambda: |-
+          char buffer[50];
+          snprintf(buffer, sizeof(buffer), "OTA progress %0.1f%%", x);
+          id(ota_status).publish_state(buffer);
+    on_end:
+      - text_sensor.template.publish:
+          id: ota_status
+          state: "OTA end"
+      - delay: 1s  # Wait for MQTT to publish the text response
+    on_error:
+      - lambda: |-
+          char buffer[50];
+          snprintf(buffer, sizeof(buffer), "OTA update error %d", x);
+          id(ota_status).publish_state(buffer);
+
+http_request:
+  verify_ssl: false  # TODO: turn this on (carried over from the legacy config)
+
+text:
+  - platform: template
+    name: "OTA HTTPS prod"
+    id: ota_https_prod
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    on_value:
+      - delay: 1s  # Wait for MQTT to publish the text response
+      - script.execute:
+          id: perform_ota_update
+          binary_name: !lambda 'return x;'
+          # Pick the server the requested version actually lives on: a test release (`.test`) is only
+          # uploaded to the HMG/test host, a production release only to the prod host, so asking the
+          # wrong host answers 404 and the OTA dies at download. `.test` is not necessarily the last
+          # suffix (version names are sorted, e.g. `v1.6.test.verbose`), so detect the `.test` token
+          # only when it is a whole dotted segment — never a naive endswith.
+          server_prefix: !lambda |-
+            bool is_test = false;
+            for (size_t pos = x.find(".test"); pos != std::string::npos;
+                 pos = x.find(".test", pos + 1)) {
+              const size_t end = pos + 5;
+              if (end == x.size() || x[end] == '.') {
+                is_test = true;
+                break;
+              }
+            }
+            return std::string("https://") +
+                   (is_test ? "${ ota_http_server_test if ota_http_server_test is defined else 1/0 }"
+                            : "${ ota_http_server if ota_http_server is defined else 1/0 }");
+
+  - platform: template
+    name: "Secret OTA"
+    id: ota_secret_ota
+    optimistic: true
+    min_length: 0
+    max_length: 255
+    mode: text
+    on_value:
+      - delay: 1s  # Wait for MQTT to publish the text response
+      - ota.http_request.flash:
+          md5_url: !lambda 'return x + "61c36f469f.bin.md5";'
+          url: !lambda 'return x + "61c36f469f.bin";'
+
+text_sensor:
+  - platform: template
+    name: "OTA status"
+    id: ota_status
+    update_interval: never
+
+script:
+  - id: perform_ota_update
+    parameters:
+      server_prefix: string
+      binary_name: string
+    then:
+      - if:
+          condition:
+            # Device-name guard: only flash a binary whose name starts with "${device_name}_" and is
+            # not a `.factory` image. A binary built for another device is rejected into an error
+            # state, never flashed. ${device_name} substitutes to the literal device name (there are
+            # no C++ defines in the SDK; the legacy DEVICE_NAME define is now a YAML substitution).
+            - lambda: 'return binary_name.find("${device_name}_") == 0 && binary_name.find(".factory") == std::string::npos;'
+          then:
+            - ota.http_request.flash:
+                md5_url: !lambda 'return server_prefix + binary_name + ".bin.md5";'
+                url: !lambda 'return server_prefix + binary_name + ".bin";'
+          else:
+            - lambda: |-
+                id(ota_status).publish_state("Error: this version is for another device");
+
+  - id: script_rollback
+    then:
+      - delay: 300s
+      - lambda: |-
+          #ifdef USE_ESP_IDF
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+          #endif

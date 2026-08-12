@@ -1,0 +1,87 @@
+# criotive_mqtt.yaml — the MQTT transport: client, topic prefix, availability messages, on_connect.
+#
+# Owns: the `mqtt:` client, the topic prefix, the birth / last-will / shutdown (availability)
+# messages — all derived from ${device_name} — and the on_connect rollback confirmation. Required
+# inputs are scoped to THIS module (see the contract in core.yaml): importing criotive_mqtt.yaml
+# makes mqtt_broker, mqtt_ca_certificate, mqtt_username and mqtt_password mandatory. None has a
+# default — no credential ever ships a default in a public repo. mqtt_port, mqtt_reboot_timeout and
+# mqtt_discovery are the optional inputs this module owns; their defaults are declared below.
+#
+# ── MQTT is TLS ONLY when a CA is configured ──────────────────────────────────────────────────
+# Port 8883 does NOT enable TLS. Verified in ESPHome 2026.5.1: mqtt/__init__.py:439 calls
+# set_ca_certificate ONLY when `certificate_authority` is present; without it the transport is plain
+# TCP whatever the port, so credentials cross the network in the clear. criotive_mqtt.yaml therefore
+# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default (see
+# ADR-0022). The platform injects the broker's CA when generating the config, so staging and
+# production can differ and the CA can rotate without an SDK release.
+#
+# ── Required-substitution guard ───────────────────────────────────────────────────────────────
+# Merely referencing ${x} does not make it required: ESPHome's substitution pass is non-strict, so a
+# missing ${x} only warns and leaves the literal in place. Every required input here lands in a
+# free-form string field that would accept the literal, so each is wrapped in the guard
+# `${ x if x is defined else 1/0 }` — present -> the value unchanged; missing -> a ZeroDivisionError
+# re-raised as a hard `esphome config` failure naming the variable. See core.yaml's header and the
+# README for the full rationale; tests/negative/ proves each omission fails.
+#
+# ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
+# The legacy on_boot MQTT lambda (NVS client-cert loading, the Azure/`were_certs_loaded` fallback
+# broker, the topic MAC suffix, the EMQX MQTT_BROKER_CLIENT_ID override) is gone. MQTT is the only
+# transport; there is no fallback broker path. The topic prefix and availability messages, which the
+# legacy set imperatively in that lambda, are now declared statically from ${device_name}. client_id
+# is left unset — ESPHome defaults it to the device name, which is the topic prefix.
+
+substitutions:
+  mqtt_port: "8883"
+  mqtt_reboot_timeout: 15min
+  mqtt_discovery: "true"
+
+mqtt:
+  id: mqtt_client
+  broker: "${ mqtt_broker if mqtt_broker is defined else 1/0 }"
+  port: ${mqtt_port}
+  username: "${ mqtt_username if mqtt_username is defined else 1/0 }"
+  password: "${ mqtt_password if mqtt_password is defined else 1/0 }"
+  # The TLS trust anchor. Its PRESENCE — not the port — is what makes ESPHome call
+  # set_ca_certificate (mqtt/__init__.py:439) and use a TLS socket. Required, no default.
+  certificate_authority: "${ mqtt_ca_certificate if mqtt_ca_certificate is defined else 1/0 }"
+  reboot_timeout: ${mqtt_reboot_timeout}
+  discovery: ${mqtt_discovery}
+  discover_ip: false
+  # Topic prefix and the Home Assistant availability messages, all derived from ${device_name}.
+  topic_prefix: ${device_name}
+  birth_message:
+    topic: ${device_name}/status
+    payload: online
+    qos: 0
+    retain: true
+  will_message:
+    topic: ${device_name}/status
+    payload: offline
+    qos: 0
+    retain: true
+  shutdown_message:
+    topic: ${device_name}/status
+    payload: offline
+    qos: 0
+    retain: true
+  log_topic:
+    topic: ${device_name}/debug
+    qos: 0
+    retain: true
+  on_connect:
+    # Explicit list syntax (a single automation as a list item). On a confirmed MQTT connection,
+    # cancel the OTA rollback timer and mark the running image valid: reaching the broker is the
+    # health signal that a freshly-flashed firmware works. `script_rollback` is defined in ota.yaml
+    # — this cross-module id reference is deliberate (a device that speaks MQTT also takes OTA), and
+    # both files ship in the same task so the reference is never split across a boundary.
+    - then:
+        - delay: 2s
+        - lambda: |-
+            // esp_ota_mark_app_valid_cancel_rollback is an ESP-IDF API; the Arduino OTA path has no
+            // equivalent rollback marker, so this is a no-op there (matches the legacy guard).
+            #ifdef USE_ESP_IDF
+              if (id(mqtt_client).is_connected()) {
+                id(script_rollback).stop();
+                esp_ota_mark_app_valid_cancel_rollback();
+              }
+            #endif
