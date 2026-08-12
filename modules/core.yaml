@@ -1,0 +1,109 @@
+# core.yaml — the criotive SDK substitution contract + the mandatory device foundation.
+#
+# core.yaml is the one documented place answering "what must every firmware supply?". It is
+# MANDATORY for every device and imports NOTHING: a consumer enumerates exactly the modules it
+# needs, because "a device compiles only what it imports" is the whole point of the split. A core
+# that pulled in wifi/mqtt/ota would make every device pay for all of them.
+#
+# ── Substitution contract ────────────────────────────────────────────────────────────────────
+# Everything is a YAML substitution (never a C++ preprocessor define — the builder sidecar injects
+# no build flags). Names are lower_snake_case. "Required" is scoped to the OWNING module: importing
+# a module makes its inputs required; core.yaml never makes another module's inputs globally
+# mandatory. No credential substitution has a default — a default password in a public repo is a
+# default password in every device that forgot to override it, so a missing credential must fail
+# validation loudly.
+#
+#   | Substitution         | Required | Default | Owner              | Notes                        |
+#   |----------------------|----------|---------|--------------------|------------------------------|
+#   | device_name          | yes      | —       | core.yaml          | node name; MQTT topic prefix |
+#   | firmware_version     | yes      | —       | core.yaml          | published as a text sensor   |
+#   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
+#   | logger_level         | no       | INFO    | core.yaml          |                              |
+#   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
+#   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
+#   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
+#   | wifi_reboot_timeout  | no       | 15min   | wifi.yaml          |                              |
+#   | mqtt_broker          | yes      | —       | criotive_mqtt.yaml |                              |
+#   | mqtt_ca_certificate  | yes      | —       | criotive_mqtt.yaml | TLS trust anchor; no default |
+#   | mqtt_port            | no       | 8883    | criotive_mqtt.yaml | port alone does NOT enable TLS |
+#   | mqtt_username        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
+#   | mqtt_password        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
+#   | mqtt_reboot_timeout  | no       | 15min   | criotive_mqtt.yaml |                              |
+#   | mqtt_discovery       | no       | true    | criotive_mqtt.yaml | Home Assistant discovery     |
+#   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |
+#   | ota_attempts         | no       | 5       | ota.yaml           | safe-mode attempts           |
+#   | ota_http_server      | yes      | —       | ota.yaml           | HTTPS OTA download host       |
+#
+# sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
+# propagate a package `ref` into a module's own `external_components:` block. core.yaml and wifi.yaml
+# carry no components, so they do not consume ${sdk_ref} yet — but the contract requires it because
+# component-bearing modules (e.g. location.yaml) do, and check-sdk-ref.sh enforces that every
+# validate fixture threads it. It is required by convention, not by a missing-default failure here.
+#
+# This module OWNS: esphome:, device identity, the firmware_version text sensor, the boot counter,
+# preferences, logger and sntp time. Optional inputs it owns (logger_level) get a default below;
+# required inputs it owns (device_name, firmware_version) are referenced with NO default.
+#
+# ── How "required" is enforced ───────────────────────────────────────────────────────────────
+# ESPHome 2026.5.1 does NOT hard-fail on an undefined substitution: the substitution pass runs
+# non-strict (components/substitutions/__init__.py — do_substitution_pass calls substitute(...,
+# strict_undefined=False)), so a missing `${x}` only logs a WARNING and leaves the literal in
+# place. `esphome config` then exits 0 unless that leftover literal happens to break a field's
+# schema. So referencing a substitution is NOT enough to make it required.
+#   - device_name lands in `esphome: name:`, whose identifier schema rejects the leftover
+#     `${device_name}` literal, so omitting it already fails — no extra guard needed.
+#   - firmware_version (and wifi.yaml's credentials) land in free-form string fields that accept
+#     the literal, so each is wrapped in the guard `${ x if x is defined else 1/0 }`: when the
+#     value is present the expression returns it unchanged; when it is missing the ZeroDivisionError
+#     surfaces as a hard `cv.Invalid` (the non-strict pass demotes UndefinedError to a warning but
+#     re-raises every other expression error), so `esphome config` exits non-zero with the offending
+#     expression — which names the variable — in the message. tests/negative/ proves each case.
+
+substitutions:
+  logger_level: INFO
+
+esphome:
+  name: ${device_name}
+  on_boot:
+    - priority: 600
+      then:
+        - text_sensor.template.publish:
+            id: firmware_version
+            # Guarded: present -> the version; missing -> hard `esphome config` failure (see header).
+            state: "${ firmware_version if firmware_version is defined else 1/0 }"
+        - lambda: |-
+            id(boots_global)++;
+            id(sensor_boots).publish_state(id(boots_global));
+
+globals:
+  - id: boots_global
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+preferences:
+  flash_write_interval: 3s
+
+logger:
+  level: ${logger_level}
+
+time:
+  - platform: sntp
+    id: sntp_time
+    on_time_sync:
+      - then:
+          - lambda: |-
+              srand(id(sntp_time).utcnow().timestamp);
+
+text_sensor:
+  - platform: template
+    name: "Firmware Version"
+    id: firmware_version
+    update_interval: never
+
+sensor:
+  - platform: template
+    id: sensor_boots
+    name: "Boots"
+    accuracy_decimals: 0
+    update_interval: never

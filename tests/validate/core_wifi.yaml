@@ -1,0 +1,30 @@
+# Positive validate fixture — imports core.yaml + wifi.yaml at the REVISION UNDER TEST plus an
+# inline esp32 hardware stub, and must pass `esphome config`. CI materializes the __SDK_REF__
+# placeholder (see tests/validate/README.md) into the PR head SHA before running, so the branch's
+# own modules are fetched from GitHub, never a published tag. check-sdk-ref.sh asserts the package
+# `ref` and every `vars.sdk_ref` are the placeholder.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential.
+substitutions:
+  device_name: core-wifi-test
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+
+# Inline hardware stub — SDK-2 owns no hardware module, so the fixture supplies the platform itself.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}

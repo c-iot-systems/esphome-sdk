@@ -88,3 +88,8 @@ jobs:
             echo "== esphome config $f =="
             esphome config "$f"
           done
+
+      - name: Negative-fixture gate (required substitutions must fail validation)
+        run: |
+          bash scripts/check-negative.sh --self-test
+          bash scripts/check-negative.sh
