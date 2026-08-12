@@ -11,6 +11,11 @@
 # line to every new subscriber). `esphome config` output for this fixture shows `log_topic:` with
 # `topic: mqtt-log-optin-testdev/debug` and `retain: false`.
 #
+# The opt-in also raises `logger_level` off the NONE default. This is REQUIRED, not decorative: the
+# global `logger:` level gates which records are ever produced, so with logger_level=NONE the MQTT
+# log listener would have nothing to publish and the topic would stay silent. A real log-publishing
+# opt-in is therefore two settings — the log_topic block AND a non-NONE logger_level.
+#
 # Self-contained: literal test values for every required substitution. The repo is public, so no
 # value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
 substitutions:
@@ -25,6 +30,9 @@ substitutions:
   mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
   ota_password: test-ota-password
   ota_http_server: ota.test.invalid/blobs/
+  # Required for the opt-in to actually emit: the global logger gates record production, so a
+  # log_topic with logger_level=NONE would publish nothing. Raise it to a real level.
+  logger_level: INFO
 
 # Inline hardware stub — SDK-3 owns no hardware module, so the fixture supplies the platform itself.
 esp32:
