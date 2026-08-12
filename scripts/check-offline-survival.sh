@@ -10,11 +10,20 @@
 # default is 15min. This gate fails the build if any `reboot_timeout` under modules/ or hardware/
 # resolves to a NON-ZERO default, so the regression can never silently return.
 #
-# What it checks: every `reboot_timeout:` KEY in modules/ and hardware/ YAML (not the
-# `*_reboot_timeout` substitution names, not comments). Its value is either a literal duration or a
-# `${substitution}` reference; a reference is resolved to that substitution's in-file default. The
-# resolved default must be a ZERO duration (0, 0s, 0ms, 0min, 0h). A non-zero default — or a
-# `${...}` reference with no discoverable in-file default (an un-provable default) — fails the gate.
+# It enforces BOTH halves of the contract, per top-level component block (quote-aware):
+#   (a) every `reboot_timeout:` key resolves to a ZERO default. A literal duration must be zero; a
+#       `${substitution}` reference is resolved to that substitution's in-file default. Zero means a
+#       numeric value of 0 in any unit (0, 0s, 0ms, 0.0s); "0.5s", "15min", "500ms" are NON-zero.
+#   (b) every declared CONNECTIVITY COMPONENT (`wifi:` / `mqtt:`) wires an active `reboot_timeout`
+#       key INSIDE ITS OWN BLOCK. Otherwise deleting/commenting the key silently restores ESPHome's
+#       non-zero stock default (15min) and the gate would go blind. Scoped per-component so a file
+#       carrying both wifi and mqtt cannot satisfy mqtt with wifi's key.
+#
+# Robustness: comment lines never count; keys may be quoted (`"wifi":`, `'reboot_timeout':`); the
+# presence check reads each component's own block, not the whole file. Modules are introduced
+# incrementally across the SDK branch chain, so a file with no reboot_timeout key and no connectivity
+# component (e.g. the SDK-1 scaffold, which has no modules) is a vacuous PASS — the self-test proves
+# every FAIL path so this is no silent no-op.
 #
 # Usage:
 #   check-offline-survival.sh [ROOT]     # scan ROOT/modules and ROOT/hardware (default: repo root)
@@ -24,16 +33,26 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Connectivity components whose reboot_timeout the offline invariant depends on.
+CONNECTIVITY_COMPONENTS="wifi mqtt"
+
+# ── low-level value helpers ───────────────────────────────────────────────────────────────────
+
+# Strip surrounding quotes and whitespace from a scalar.
+_unquote() {
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"        # ltrim
+  v="${v%"${v##*[![:space:]]}"}"        # rtrim
+  if [[ "$v" == \"*\" || "$v" == \'*\' ]]; then v="${v:1:${#v}-2}"; fi
+  printf '%s' "$v"
+}
+
 # True iff $1 is a zero-valued duration. The numeric part is everything up to the first unit letter
 # and MAY carry a decimal point — ESPHome accepts fractional durations (e.g. 0.5s). Zero iff the
 # numeric part contains a digit and NO non-zero digit: "0", "0s", "0.0s", "00ms" are zero, but
-# "0.5s", "15min", "500ms" are NOT (a leading-digits-only test would wrongly accept "0.5s"). A value
-# with no numeric part (e.g. an unresolved "${x}") is NOT zero.
+# "0.5s", "15min", "500ms" are NOT. A value with no numeric part (e.g. unresolved "${x}") is NOT zero.
 _is_zero_duration() {
-  local v="$1"
-  v="${v//\"/}"; v="${v//\'/}"          # strip quotes
-  v="${v#"${v%%[![:space:]]*}"}"        # ltrim
-  v="${v%"${v##*[![:space:]]}"}"        # rtrim
+  local v; v="$(_unquote "$1")"
   local num="${v%%[a-zA-Z]*}"           # numeric part (before the unit); may contain '.'
   [[ "$num" =~ ^[0-9.]+$ ]] || return 1 # digits/dot only — rejects "", "${x}", junk
   [[ "$num" =~ [1-9] ]] && return 1     # any non-zero digit -> non-zero duration
@@ -41,41 +60,64 @@ _is_zero_duration() {
 }
 
 # Resolve a reboot_timeout RHS to its effective default. A `${name}` reference is looked up as
-# `name`'s substitution default in the SAME file; a literal is returned as-is. Prints the resolved
-# value (empty if a `${name}` reference has no in-file default).
+# `name`'s substitution default in the SAME file (quote-aware); a literal is returned as-is. Prints
+# the resolved value (empty if a `${name}` reference has no in-file default).
 _resolve_value() {
   local raw="$1" file="$2" v name def
   v="${raw%%#*}"                        # drop trailing inline comment
-  v="${v#"${v%%[![:space:]]*}"}"        # ltrim
-  v="${v%"${v##*[![:space:]]}"}"        # rtrim
+  v="$(_unquote "$v")"
   if [[ "$v" =~ ^\$\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}$ ]]; then
     name="${BASH_REMATCH[1]}"
-    # First mapping line `<name>: <value>` in the file — the substitution default. Comments (`#...`)
-    # never match this anchored pattern.
-    def="$(grep -oE "^[[:space:]]*${name}[[:space:]]*:[[:space:]]*[^#]+" "$file" 2>/dev/null | head -n1 \
-             | sed -E "s/^[[:space:]]*${name}[[:space:]]*:[[:space:]]*//")"
-    def="${def%"${def##*[![:space:]]}"}"   # rtrim
-    printf '%s' "$def"
+    # First mapping line `<name>: <value>` (optionally quoted key) — the substitution default.
+    def="$(grep -oE "^[[:space:]]*[\"']?${name}[\"']?[[:space:]]*:[[:space:]]*[^#]+" "$file" 2>/dev/null | head -n1 \
+             | sed -E "s/^[[:space:]]*[\"']?${name}[\"']?[[:space:]]*:[[:space:]]*//")"
+    _unquote "$def"
   else
     printf '%s' "$v"
   fi
 }
 
-# Scan one file. Prints one line per reboot_timeout key; returns non-zero if any resolves non-zero.
-scan_file() {
-  local file="$1" rc=0 lineno content value resolved trimmed
-  # `(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:` — the boundary keeps `wifi_reboot_timeout:` /
-  # `mqtt_reboot_timeout:` (the substitution names, preceded by `_`) from matching.
+# ── structural helpers ────────────────────────────────────────────────────────────────────────
+
+# Anchored, quote-aware, comment-safe match for an ACTIVE `reboot_timeout:` mapping key. A comment
+# line (`# reboot_timeout: ...`) never matches: after leading space the first token is `#`, not the
+# (optionally quoted) key. `wifi_reboot_timeout:` never matches either: the key must follow the
+# leading space/quote directly.
+_RT_KEY_RE='^[[:space:]]*["'\'']?reboot_timeout["'\'']?[[:space:]]*:'
+
+# Top-level component key, quote-aware, at column 0.
+_comp_key_re() { printf '^["'\'']?%s["'\'']?[[:space:]]*:' "$1"; }
+
+# True iff file $1 declares top-level component $2.
+_file_has_component() { grep -qE "$(_comp_key_re "$2")" "$1" 2>/dev/null; }
+
+# True iff component $2's OWN top-level block in file $1 contains an active reboot_timeout key.
+# The block runs from the component key line to the next column-0, non-comment content line.
+_component_has_reboot_timeout() {
+  local file="$1" comp="$2"
+  awk -v start="$(_comp_key_re "$comp")" -v rt="$_RT_KEY_RE" '
+    $0 ~ start { inblk=1; next }
+    inblk {
+      if ($0 ~ /^[^[:space:]#]/) { inblk=0 }      # next top-level construct ends the block
+      else if ($0 ~ rt)          { found=1 }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+# ── scanning ──────────────────────────────────────────────────────────────────────────────────
+
+# Check every active reboot_timeout key in one file resolves to a zero default. Prints one line per
+# key; returns non-zero if any resolves non-zero (or unresolvable).
+scan_file_values() {
+  local file="$1" rc=0 lineno content value resolved
   while IFS= read -r line; do
     lineno="${line%%:*}"
     content="${line#*:}"
-    trimmed="${content#"${content%%[![:space:]]*}"}"
-    [[ "$trimmed" == \#* ]] && continue                 # skip comment lines
-    value="${content#*reboot_timeout}"                  # drop up to the key name
-    value="${value#*:}"                                 # drop the colon
+    value="$(printf '%s\n' "$content" | sed -E "s/${_RT_KEY_RE}[[:space:]]*//")"
     resolved="$(_resolve_value "$value" "$file")"
     if [[ -z "$resolved" ]]; then
-      echo "check-offline-survival: FAIL — ${file}:${lineno}: reboot_timeout '$(echo "$value" | xargs)' has no resolvable in-repo default (must default to 0s)"
+      echo "check-offline-survival: FAIL — ${file}:${lineno}: reboot_timeout '$(_unquote "$value")' has no resolvable in-repo default (must default to 0s)"
       rc=1
     elif _is_zero_duration "$resolved"; then
       echo "check-offline-survival: ok — ${file}:${lineno}: reboot_timeout default resolves to '${resolved}' (reboot disabled)"
@@ -83,31 +125,12 @@ scan_file() {
       echo "check-offline-survival: FAIL — ${file}:${lineno}: reboot_timeout default resolves to '${resolved}' (non-zero — a device would reboot ${resolved} into an outage)"
       rc=1
     fi
-  done < <(grep -nE '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$file" 2>/dev/null)
+  done < <(grep -nE "$_RT_KEY_RE" "$file" 2>/dev/null)
   return "$rc"
 }
 
-# Connectivity components whose reboot_timeout the offline invariant depends on. A module that
-# declares one of these AS A TOP-LEVEL COMPONENT (`^wifi:` / `^mqtt:`) MUST also wire an explicit
-# reboot_timeout — otherwise simply DELETING the key silently restores ESPHome's non-zero stock
-# default (15min) and the device reboots through an outage, a regression this gate would be blind to
-# if it only scanned the keys that happen to be present. Scoped per-file because modules are
-# introduced incrementally across the SDK branch chain: a file with no wifi:/mqtt: component (e.g.
-# the SDK-1 scaffold, which has no modules at all) has nothing to pin and is vacuously ok.
-CONNECTIVITY_COMPONENTS="wifi mqtt"
-
-# True iff $1 has a reboot_timeout mapping key on a NON-comment line. A raw text match would count a
-# commented-out key (`# reboot_timeout: ${x}`) as present, letting someone disable the key while the
-# presence check still passes and ESPHome restores its 15min stock default. Excluding comment lines
-# closes that bypass: the key must be a live mapping entry.
-_has_active_reboot_timeout() {
-  grep -E '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$1" 2>/dev/null | grep -qvE '^[[:space:]]*#'
-}
-
-# Scan ROOT/modules and ROOT/hardware. Enforces BOTH: (a) every reboot_timeout key resolves to a
-# zero default, and (b) every declared connectivity component wires a reboot_timeout key. Zero of
-# both across the tree is a vacuous PASS; the self-test proves each FAIL path so this is no silent
-# no-op.
+# Scan ROOT/modules and ROOT/hardware. Enforces (a) values resolve to 0s and (b) each connectivity
+# component wires its own active reboot_timeout. Zero of both across the tree is a vacuous PASS.
 scan_root() {
   local root="$1" rc=0 found=0 f comp
   local -a dirs=("$root/modules" "$root/hardware")
@@ -115,18 +138,16 @@ scan_root() {
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
       # (a) every reboot_timeout key present must resolve to 0s.
-      if grep -qE '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$f" 2>/dev/null; then
+      if grep -qE "$_RT_KEY_RE" "$f" 2>/dev/null; then
         found=1
-        scan_file "$f" || rc=1
+        scan_file_values "$f" || rc=1
       fi
-      # (b) a file declaring a connectivity component MUST wire an ACTIVE reboot_timeout — closes the
-      #     "delete (or comment out) the key -> inherit the 15min stock default -> gate goes blind"
-      #     bypass. Uses _has_active_reboot_timeout so a commented-out key does not count as present.
+      # (b) each declared connectivity component must wire its OWN active reboot_timeout.
       for comp in $CONNECTIVITY_COMPONENTS; do
-        if grep -qE "^${comp}:([[:space:]]|$)" "$f" 2>/dev/null; then
+        if _file_has_component "$f" "$comp"; then
           found=1
-          if ! _has_active_reboot_timeout "$f"; then
-            echo "check-offline-survival: FAIL — ${f}: declares '${comp}:' but wires no active reboot_timeout — it would inherit ESPHome's non-zero stock default (15min)"
+          if ! _component_has_reboot_timeout "$f" "$comp"; then
+            echo "check-offline-survival: FAIL — ${f}: '${comp}:' block wires no active reboot_timeout — it would inherit ESPHome's non-zero stock default (15min)"
             rc=1
           fi
         fi
@@ -139,105 +160,78 @@ scan_root() {
   return "$rc"
 }
 
+# ── self-test ─────────────────────────────────────────────────────────────────────────────────
+
+# Run scan_root over a scratch tree and assert it PASSES ($1=pass) or FAILS ($1=fail).
+_expect() {
+  local want="$1" root="$2" label="$3"
+  if scan_root "$root" >/dev/null 2>&1; then
+    [ "$want" = pass ] && echo "self-test: PASS — ${label}" || { echo "self-test: FAILED — ${label} (expected FAIL, got pass)"; return 1; }
+  else
+    [ "$want" = fail ] && echo "self-test: PASS — ${label}" || { echo "self-test: FAILED — ${label} (expected pass, got FAIL)"; return 1; }
+  fi
+}
+
 self_test() {
   local tmp rc=0
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/modules" "$tmp/hardware"
 
-  # GOOD: a literal 0s, and a ${sub} whose in-file default is 0s. scan_root must PASS.
+  # GOOD: literal 0s + a ${sub} whose default is 0s, in separate files, each component with its key.
   cat >"$tmp/modules/wifi.yaml" <<'YAML'
 substitutions:
   wifi_reboot_timeout: 0s
 wifi:
+  ssid: x
   reboot_timeout: ${wifi_reboot_timeout}
 YAML
   cat >"$tmp/hardware/board.yaml" <<'YAML'
 mqtt:
   reboot_timeout: 0s
 YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: PASS on good tree (0s literal + 0s substitution default) — ok"
-  else
-    echo "self-test: FAILED — a good 0s tree was rejected"; rc=1
-  fi
+  _expect pass "$tmp" "good tree (0s literal + 0s substitution default)" || rc=1
 
-  # BAD 1: a literal non-zero default (reboot_timeout: 15min). scan_root MUST fail.
+  # BAD 1: a literal non-zero default.
+  printf 'wifi:\n  reboot_timeout: 15min\n' >"$tmp/modules/wifi.yaml"; : >"$tmp/hardware/board.yaml"
+  _expect fail "$tmp" "literal reboot_timeout: 15min rejected" || rc=1
+
+  # BAD 2: a ${sub} whose in-file default is non-zero (proves substitution resolution).
+  printf 'substitutions:\n  wifi_reboot_timeout: 15min\nwifi:\n  reboot_timeout: ${wifi_reboot_timeout}\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "substitution default 15min rejected" || rc=1
+
+  # BAD 3: a ${sub} with no discoverable in-file default (un-provable).
+  printf 'wifi:\n  reboot_timeout: ${wifi_reboot_timeout}\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "unresolvable default rejected" || rc=1
+
+  # BAD 4: a FRACTIONAL non-zero duration (0.5s) — a leading-digits-only test would wrongly accept it.
+  printf 'wifi:\n  reboot_timeout: 0.5s\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "fractional 0.5s rejected" || rc=1
+
+  # BAD 5: a connectivity component with NO reboot_timeout key.
+  printf 'wifi:\n  ssid: x\n  password: y\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "connectivity component missing reboot_timeout rejected" || rc=1
+
+  # BAD 6: a connectivity component whose reboot_timeout is COMMENTED OUT.
+  printf 'substitutions:\n  wifi_reboot_timeout: 0s\nwifi:\n  ssid: x\n  # reboot_timeout: ${wifi_reboot_timeout}\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "commented-out reboot_timeout rejected" || rc=1
+
+  # BAD 7: ONE file with BOTH wifi and mqtt where only wifi has the key — mqtt must still be caught
+  # (per-component, not file-wide).
   cat >"$tmp/modules/wifi.yaml" <<'YAML'
 wifi:
-  reboot_timeout: 15min
+  reboot_timeout: 0s
+mqtt:
+  broker: x
 YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a literal reboot_timeout: 15min was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (literal 15min rejected) — ok"
-  fi
+  _expect fail "$tmp" "combined wifi+mqtt with mqtt key missing rejected" || rc=1
 
-  # BAD 2: a ${sub} reference whose in-file default is non-zero. Proves substitution resolution.
-  cat >"$tmp/modules/wifi.yaml" <<'YAML'
-substitutions:
-  wifi_reboot_timeout: 15min
-wifi:
-  reboot_timeout: ${wifi_reboot_timeout}
-YAML
-  cat >"$tmp/hardware/board.yaml" <<'YAML'
-# nothing here
-YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a ${sub} defaulting to 15min was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (substitution default 15min rejected) — ok"
-  fi
+  # BAD 8: QUOTED keys with a non-zero timeout must not slip through as a vacuous pass.
+  printf '"wifi":\n  "reboot_timeout": 15min\n' >"$tmp/modules/wifi.yaml"
+  _expect fail "$tmp" "quoted wifi/reboot_timeout keys with 15min rejected" || rc=1
 
-  # BAD 3: a ${sub} reference with no discoverable in-file default (un-provable). MUST fail.
-  cat >"$tmp/modules/wifi.yaml" <<'YAML'
-wifi:
-  reboot_timeout: ${wifi_reboot_timeout}
-YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a reboot_timeout with no in-repo default was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (unresolvable default rejected) — ok"
-  fi
-
-  # BAD 4: a FRACTIONAL non-zero duration (0.5s). A leading-digits-only zero test would wrongly
-  # accept it (num=0); it must be rejected.
-  cat >"$tmp/modules/wifi.yaml" <<'YAML'
-wifi:
-  reboot_timeout: 0.5s
-YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a fractional reboot_timeout: 0.5s was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (fractional 0.5s rejected) — ok"
-  fi
-
-  # BAD 5: a connectivity component (`wifi:`) declared with NO reboot_timeout key — deleting the key
-  # would silently inherit ESPHome's 15min stock default. The presence assertion must catch it.
-  cat >"$tmp/modules/wifi.yaml" <<'YAML'
-wifi:
-  ssid: x
-  password: y
-YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a wifi: component with no reboot_timeout was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (connectivity component missing reboot_timeout rejected) — ok"
-  fi
-
-  # BAD 6: a connectivity component whose reboot_timeout is COMMENTED OUT. A raw text match would
-  # count it as present; the active-key check must still reject it.
-  cat >"$tmp/modules/wifi.yaml" <<'YAML'
-substitutions:
-  wifi_reboot_timeout: 0s
-wifi:
-  ssid: x
-  # reboot_timeout: ${wifi_reboot_timeout}
-YAML
-  if scan_root "$tmp" >/dev/null 2>&1; then
-    echo "self-test: FAILED — a wifi: component with only a COMMENTED reboot_timeout was NOT rejected"; rc=1
-  else
-    echo "self-test: PASS on bad tree (commented-out reboot_timeout rejected) — ok"
-  fi
+  # GOOD 2: quoted keys resolving to 0s must PASS.
+  printf '"wifi":\n  "reboot_timeout": 0s\n' >"$tmp/modules/wifi.yaml"
+  _expect pass "$tmp" "quoted keys resolving to 0s accepted" || rc=1
 
   rm -rf "$tmp"
   if [ "$rc" -eq 0 ]; then echo "self-test: all cases passed"; fi
