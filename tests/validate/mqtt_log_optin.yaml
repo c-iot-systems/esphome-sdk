@@ -1,0 +1,63 @@
+# Positive validate fixture — the MQTT log-publishing OPT-IN path. Imports core + wifi +
+# criotive_mqtt + ota at the REVISION UNDER TEST plus an inline esp32 hardware stub, and must pass
+# `esphome config`. CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md) into
+# the PR head SHA before running; check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref`
+# are the placeholder.
+#
+# criotive_mqtt.yaml ships `log_topic:` null (no log publishing — see mqtt_ota.yaml, whose dumped
+# `mqtt:` shows `log_topic: null`). This fixture is the counterpart: it proves a consumer can OPT IN
+# by adding its own `mqtt: log_topic:` block, which merges over the module's null. The opt-in sets
+# `retain: false` — mandatory for a rolling log topic (a retained log topic would replay one stale
+# line to every new subscriber). `esphome config` output for this fixture shows `log_topic:` with
+# `topic: mqtt-log-optin-testdev/debug` and `retain: false`.
+#
+# The opt-in also raises `logger_level` off the NONE default. This is REQUIRED, not decorative: the
+# global `logger:` level gates which records are ever produced, so with logger_level=NONE the MQTT
+# log listener would have nothing to publish and the topic would stay silent. A real log-publishing
+# opt-in is therefore two settings — the log_topic block AND a non-NONE logger_level.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: mqtt-log-optin-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+  # Required for the opt-in to actually emit: the global logger gates record production, so a
+  # log_topic with logger_level=NONE would publish nothing. Raise it to a real level.
+  logger_level: INFO
+
+# Inline hardware stub — SDK-3 owns no hardware module, so the fixture supplies the platform itself.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Consumer opt-in: publish this device's logs to the broker. Merges over criotive_mqtt.yaml's
+# `log_topic:` null. retain MUST be false for a rolling log topic.
+mqtt:
+  log_topic:
+    topic: ${device_name}/debug
+    qos: 0
+    retain: false
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}

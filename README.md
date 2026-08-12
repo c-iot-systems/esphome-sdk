@@ -76,6 +76,7 @@ the modules it imports.
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
 | `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
+| `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
@@ -160,6 +161,53 @@ port, and a config that sets `8883` and no CA sends credentials in the clear. `c
 therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
 `certificate_authority`. The platform injects the broker's CA when generating the config, so staging
 and production can differ and the CA can rotate without an SDK release.
+
+### MQTT log publishing is off by default
+
+Legacy firmware never published logs to the broker — it had no `log_topic` at all. `criotive_mqtt.yaml`
+keeps that parity: **no device streams its logs to MQTT unless a consumer opts in.**
+
+This is not the same as omitting the key. ESPHome's `mqtt` component (`mqtt/__init__.py`,
+`validate_config`) **re-injects** a default `${topic_prefix}/debug` log topic (with `retain: true`)
+whenever a `topic_prefix` is set, so merely deleting `log_topic` would leave every device publishing
+its logs. Disabling requires the key to be **present but empty** — `log_topic:` with a null value —
+which drives the codegen branch `if not log_topic: disable_log_message()`. `esphome config` over
+`tests/validate/mqtt_ota.yaml` proves it: the dumped `mqtt:` shows `log_topic: null` and no `/debug`
+topic, the same standard by which the fixture proves the TLS `certificate_authority`.
+
+**Opting in (per device).** A consumer that wants a device's logs on the broker sets **two** things
+in that device's config: its own `mqtt: log_topic:` block (which merges over the module's null) **and**
+a non-`NONE` `logger_level`. Both are needed — the global `logger:` level gates which records are ever
+produced, so a `log_topic` with `logger_level: NONE` (the default) publishes nothing and the topic
+stays silent:
+
+```yaml
+substitutions:
+  logger_level: INFO   # or DEBUG/VERBOSE/VERY_VERBOSE — REQUIRED, or nothing is published
+mqtt:
+  log_topic:
+    topic: ${device_name}/debug
+    qos: 0
+    retain: false      # REQUIRED for a log topic — see below
+```
+
+`retain` **must be `false`** here. Retain is correct for birth / will / shutdown, where the retained
+message is the device's *current* online state a new subscriber should see immediately. A log topic
+is a rolling stream: each line overwrites the last, so a retained log topic makes the broker replay
+one arbitrary, stale log line to every new subscriber — never what a log consumer wants.
+`tests/validate/mqtt_log_optin.yaml` exercises this opt-in path.
+
+### OTA rollback watchdog is offline-safe
+
+`ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
+broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
+known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+`esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
+unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
+a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
+The watchdog is therefore gated on `ESP_OTA_IMG_PENDING_VERIFY` (ESP-IDF's own idiom in
+`esp_ota_begin`): only a freshly-flashed, not-yet-verified image can roll back; a confirmed,
+long-offline image is never touched. OTA safety is preserved and offline survival is guaranteed.
 
 ## `${sdk_ref}` — pinning the components with the YAML
 
@@ -250,7 +298,13 @@ restructuring the others.
 - `criotive_mqtt.yaml` — mqtt client, topic prefix, birth / last-will / shutdown messages,
   `on_connect`.
 - `ota.yaml` — `safe_mode`, both OTA platforms, `http_request`, ota_status, `perform_ota_update`,
-  rollback script.
+  rollback script. `perform_ota_update` only flashes a binary whose name starts with
+  `${device_name}_` (a build for another device is rejected into an error state). It picks the
+  download host by detecting a `.test` token in the requested version name — routing test builds to
+  the optional `ota_http_server_test` (default `${ota_http_server}`) and everything else to the
+  required `ota_http_server`. `.test` is matched only as a whole dotted segment, because version
+  names are sorted and `.test` is not necessarily the last suffix. The rollback watchdog armed on
+  boot here is cancelled by `criotive_mqtt.yaml`'s `on_connect` once the broker is reached.
 - `diagnostics.yaml` — `debug` platform, device info, reset reason.
 - `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
 - `location.yaml` — `google_location` and its `external_components`.
