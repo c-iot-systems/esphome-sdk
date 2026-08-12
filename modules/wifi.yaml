@@ -17,8 +17,15 @@ wifi:
   reboot_timeout: ${wifi_reboot_timeout}
   power_save_mode: none
   ap:
-    # Static placeholder SSID; the on_boot lambda below replaces it with the length-safe form.
-    ssid: "criotive - ${device_name}"
+    # A SHORT constant placeholder, not "criotive - ${device_name}": ESPHome validates the AP SSID
+    # against the 32-char limit at config time, BEFORE the on_boot lambda runs, so a device_name
+    # longer than ~21 chars would fail config on the prefixed SSID and never reach the truncation.
+    # The lambda below installs the real, length-safe SSID at boot.
+    ssid: "criotive setup"
+    # The AP password stays HERE, in the config field, so ESPHome's codegen escapes it. It must NOT
+    # be interpolated into the lambda's C++ source: a value containing a quote or backslash would
+    # break compilation. The lambda preserves it by copying the already-built AP (get_ap) and
+    # changing only the SSID.
     password: "${ wifi_ap_password if wifi_ap_password is defined else 1/0 }"
     ap_timeout: 30s
 
@@ -29,7 +36,7 @@ esphome:
     # Preserve the legacy fallback-AP SSID rule: a WiFi SSID is limited to 31 characters, so start
     # from "criotive - <device_name>" and, when that overflows, drop the "criotive - " prefix FIRST;
     # if the bare device name is still too long, keep its right-most 31 characters. Runs at a high
-    # priority so the AP is configured before the WiFi component brings the access point up.
+    # priority so the AP is reconfigured before the WiFi component brings the access point up.
     - priority: 600
       then:
         - lambda: |-
@@ -44,9 +51,10 @@ esphome:
                 ap_ssid = ap_ssid.substr(ap_ssid.length() - max_size);
               }
             }
-            wifi::WiFiAP wifi_wifiap = wifi::WiFiAP();
+            // Copy the AP built from the config above (password + timeout already set, and escaped
+            // by codegen) and change only the SSID — never re-inject the password from YAML.
+            wifi::WiFiAP wifi_wifiap = wifi::global_wifi_component->get_ap();
             wifi_wifiap.set_ssid(ap_ssid);
-            wifi_wifiap.set_password("${wifi_ap_password}");
             wifi::global_wifi_component->set_ap(wifi_wifiap);
 
 text_sensor:
