@@ -1,0 +1,30 @@
+# hds_v1_0 — concrete board definition + pin map for the v1.0 board.
+#
+# A hardware file owns the platform component (esp32:) and the board-specific I/O. Board, variant
+# and framework are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+#
+# This board has no indicator LEDs, so it ships no OTA visual feedback. The rule still holds: a
+# hardware file WITH LEDs would drive its own OTA feedback by its own ids, and no module reaches
+# into a hardware id.
+#
+# Pin map:
+#   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
+#
+# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
+# segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
+# Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+substitutions:
+  can_resistor_status: ALWAYS_ON
+
+esp32:
+  board: pico32
+  variant: esp32
+  framework:
+    type: arduino
+
+switch:
+  - platform: gpio
+    pin: 12
+    name: "CAN Resistor"
+    internal: true
+    restore_mode: ${can_resistor_status}
