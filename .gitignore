@@ -1,0 +1,9 @@
+# Orchestration run dirs (cross-review writes here; must never dirty the tree)
+.orchestration/
+
+# ESPHome build/cache output
+.esphome/
+
+# Python
+__pycache__/
+*.pyc

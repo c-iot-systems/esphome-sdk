@@ -1,0 +1,90 @@
+name: validate
+
+# Validate on every pull request. This checks the REVISION UNDER TEST, never a published tag:
+# each validate fixture carries the literal placeholder __SDK_REF__ and CI materializes the PR
+# head SHA into both the package `ref` and every `vars.sdk_ref`, so `esphome config` resolves the
+# branch's own code from GitHub rather than the last release.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  ESPHOME_VERSION: "2026.5.1"
+  # The head commit of the PR branch — pushed to origin, so ESPHome can fetch packages at it.
+  SDK_REF: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Automation list-syntax gate
+        run: |
+          bash scripts/check-automation-syntax.sh --self-test
+          bash scripts/check-automation-syntax.sh
+
+      - name: SDK ref-consistency gate
+        run: |
+          bash scripts/check-sdk-ref.sh --self-test
+          bash scripts/check-sdk-ref.sh
+
+      - name: Materialize the revision under test into validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures yet — nothing to materialize."
+            exit 0
+          fi
+          echo "Materializing SDK_REF=${SDK_REF} into ${#files[@]} fixture(s)"
+          for f in "${files[@]}"; do
+            sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
+          done
+          # Guard: no placeholder may survive, and every resolved ref must be exactly the SHA.
+          # Scan only the YAML fixtures — tests/validate/README.md intentionally documents the
+          # literal __SDK_REF__ placeholder and must not be treated as a fixture.
+          if grep -l '__SDK_REF__' "${files[@]}" ; then
+            echo "::error::A fixture still contains __SDK_REF__ after materialization"
+            exit 1
+          fi
+          bad=0
+          for f in "${files[@]}"; do
+            while IFS= read -r val; do
+              if [ "$val" != "${SDK_REF}" ]; then
+                echo "::error::${f}: resolved ref '${val}' != head SHA '${SDK_REF}'"
+                bad=1
+              fi
+            done < <(grep -oE '(^[[:space:]]*ref:|sdk_ref:)[[:space:]]*[^},[:space:]]+' "$f" \
+                       | sed -E 's/.*:[[:space:]]*//')
+          done
+          [ "$bad" -eq 0 ]
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: esphome config over validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures yet — scaffold is green with no modules."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "== esphome config $f =="
+            esphome config "$f"
+          done
