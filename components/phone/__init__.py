@@ -9,6 +9,12 @@ from esphome.components import binary_sensor, text_sensor
 from esphome.const import CONF_ID, CONF_PIN, CONF_TRIGGER_ID
 
 CODEOWNERS = ["Arthur Komatsu"]
+# phone.h unconditionally includes binary_sensor.h and holds a binary_sensor::BinarySensor*
+# member (the optional hook sensor), so binary_sensor's C++ must be built whenever phone is used —
+# even when no hook_sensor is configured. Importing the Python module for the schema does not load
+# its C++ resources, so AUTO_LOAD it, or a phone with no hook sensor fails to compile. (text_sensor
+# stays optional: it is guarded by #ifdef USE_TEXT_SENSOR and only referenced when configured.)
+AUTO_LOAD = ["binary_sensor"]
 MULTI_CONF = True
 
 CONF_ROWS = "rows"
