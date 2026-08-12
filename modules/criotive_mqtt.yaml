@@ -64,10 +64,20 @@ mqtt:
     payload: offline
     qos: 0
     retain: true
+  # No MQTT log publishing by default — parity with legacy, which never had a log_topic at all.
+  # ESPHome does NOT treat "omit log_topic" as "off": mqtt/__init__.py validate_config re-injects a
+  # default `${topic_prefix}/debug` (retain: true) whenever a topic_prefix is set, so simply deleting
+  # this key would keep every device streaming its logs to the broker. Disabling requires log_topic to
+  # be PRESENT but empty (null): the codegen path (mqtt/__init__.py: `if not log_topic:
+  # var.disable_log_message()`) then turns publishing off. `esphome config` on tests/validate/
+  # mqtt_ota.yaml proves it — the dumped `mqtt:` shows `log_topic: null`, no /debug topic.
+  #
+  # Opt-in is a per-device concern: a consumer that wants device logs on the broker adds its own
+  # `mqtt: log_topic:` block in its device config (it merges over this null), and MUST set
+  # `retain: false` — a rolling log topic where each line overwrites the last must not be retained, or
+  # the broker replays one arbitrary stale line to every new subscriber. tests/validate/
+  # mqtt_log_optin.yaml exercises that path. See the README.
   log_topic:
-    topic: ${device_name}/debug
-    qos: 0
-    retain: true
   on_connect:
     # Explicit list syntax (a single automation as a list item). On a confirmed MQTT connection,
     # cancel the OTA rollback timer and mark the running image valid: reaching the broker is the
