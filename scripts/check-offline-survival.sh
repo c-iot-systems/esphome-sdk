@@ -91,15 +91,25 @@ _comp_key_re() { printf '^["'\'']?%s["'\'']?[[:space:]]*:' "$1"; }
 # True iff file $1 declares top-level component $2.
 _file_has_component() { grep -qE "$(_comp_key_re "$2")" "$1" 2>/dev/null; }
 
-# True iff component $2's OWN top-level block in file $1 contains an active reboot_timeout key.
-# The block runs from the component key line to the next column-0, non-comment content line.
+# True iff component $2's OWN top-level block in file $1 has a DIRECT reboot_timeout child. The
+# block runs from the component key line to the next column-0, non-comment content line. A match must
+# be a real mapping key at the component's direct-child indentation — NOT text buried in a deeper
+# block scalar (e.g. `ssid: |` content) or a nested sub-block, which sit at a greater indent. This is
+# ESPHome-correct: reboot_timeout is a direct option of wifi:/mqtt:, at the same indent as ssid/broker.
 _component_has_reboot_timeout() {
   local file="$1" comp="$2"
-  awk -v start="$(_comp_key_re "$comp")" -v rt="$_RT_KEY_RE" '
-    $0 ~ start { inblk=1; next }
+  awk -v start="$(_comp_key_re "$comp")" '
+    function indent(s){ match(s, /^ */); return RLENGTH }
+    $0 ~ start { inblk=1; child=-1; next }
     inblk {
-      if ($0 ~ /^[^[:space:]#]/) { inblk=0 }      # next top-level construct ends the block
-      else if ($0 ~ rt)          { found=1 }
+      if ($0 ~ /^[^ \t#]/)               { inblk=0; next }   # next top-level construct ends the block
+      if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ \t]*#/) next           # blank or comment
+      ind = indent($0)
+      if (child < 0) child = ind                             # first real child sets the direct-child indent
+      if (ind == child) {
+        rest = substr($0, ind + 1)
+        if (rest ~ /^["'\'']?reboot_timeout["'\'']?[ \t]*:/) found = 1
+      }
     }
     END { exit(found ? 0 : 1) }
   ' "$file"
@@ -232,6 +242,27 @@ YAML
   # GOOD 2: quoted keys resolving to 0s must PASS.
   printf '"wifi":\n  "reboot_timeout": 0s\n' >"$tmp/modules/wifi.yaml"
   _expect pass "$tmp" "quoted keys resolving to 0s accepted" || rc=1
+
+  # BAD 9: a reboot_timeout buried in a BLOCK SCALAR (not a direct child of wifi) must NOT satisfy
+  # the presence check — wifi has no real reboot_timeout and would inherit the 15min default.
+  cat >"$tmp/modules/wifi.yaml" <<'YAML'
+wifi:
+  ssid: |
+    reboot_timeout: 0s
+  password: x
+YAML
+  _expect fail "$tmp" "block-scalar reboot_timeout does not satisfy presence" || rc=1
+
+  # GOOD 3: a real direct-child reboot_timeout at the component indent, alongside a block scalar
+  # elsewhere, must PASS (the block scalar must not disturb the direct-child detection).
+  cat >"$tmp/modules/wifi.yaml" <<'YAML'
+wifi:
+  ssid: |
+    multiline banner
+  reboot_timeout: 0s
+  password: x
+YAML
+  _expect pass "$tmp" "direct-child reboot_timeout alongside a block scalar accepted" || rc=1
 
   rm -rf "$tmp"
   if [ "$rc" -eq 0 ]; then echo "self-test: all cases passed"; fi
