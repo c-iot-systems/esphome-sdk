@@ -1,0 +1,100 @@
+# wifi.yaml — opt-in WiFi station + fallback AP, captive portal, and WiFi diagnostics.
+#
+# Owns: wifi:, captive_portal, the AP-name lambda, the wifi_info text sensors and the wifi_signal
+# sensor. Required inputs (see the contract in core.yaml) are scoped to THIS module: importing
+# wifi.yaml makes wifi_ssid, wifi_password and wifi_ap_password mandatory — none has a default (no
+# credential ever ships a default in a public repo). Each is wrapped in the required-substitution
+# guard `${ x if x is defined else 1/0 }`: present -> the value unchanged; missing -> a hard
+# `esphome config` error (see core.yaml's header for why plain references are not enough in ESPHome
+# 2026.5.1). wifi_reboot_timeout is the one optional input this module owns.
+
+substitutions:
+  # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the WiFi reboot
+  # outright, so a device on a flaky uplink rides out an outage instead of power-cycling through it.
+  # Proven, not assumed — ESPHome 2026.5.1 wifi_component.cpp:867-871:
+  #     if (!this->has_ap() && this->reboot_timeout_ != 0) {
+  #       if (now - this->last_connected_ > this->reboot_timeout_) { ... App.reboot(); }
+  #     }
+  # set_reboot_timeout(0) leaves reboot_timeout_ == 0, so the `!= 0` guard is false and App.reboot()
+  # is unreachable — the timeout is never armed. (Belt-and-suspenders: the same line also requires
+  # `!this->has_ap()`, and this module ALWAYS configures a fallback AP, so the reboot is doubly
+  # disabled here.) Legacy pinned WIFI_REBOOT_TIMEOUT to 0s for exactly this reason; ESPHome's stock
+  # default is 15min (wifi/__init__.py:458), which the SDK port silently adopted and this restores.
+  # Overridable per device, but the DEFAULT must stay 0s — scripts/check-offline-survival.sh (wired
+  # into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
+  # non-zero, so this can never silently regress again.
+  wifi_reboot_timeout: 0s
+
+wifi:
+  ssid: "${ wifi_ssid if wifi_ssid is defined else 1/0 }"
+  password: "${ wifi_password if wifi_password is defined else 1/0 }"
+  reboot_timeout: ${wifi_reboot_timeout}
+  power_save_mode: none
+  ap:
+    # A SHORT constant placeholder, not "criotive - ${device_name}": ESPHome validates the AP SSID
+    # against the 32-char limit at config time, BEFORE the on_boot lambda runs, so a device_name
+    # longer than ~21 chars would fail config on the prefixed SSID and never reach the truncation.
+    # The lambda below installs the real, length-safe SSID at boot.
+    ssid: "criotive setup"
+    # The AP password stays HERE, in the config field, so ESPHome's codegen escapes it. It must NOT
+    # be interpolated into the lambda's C++ source: a value containing a quote or backslash would
+    # break compilation. The lambda preserves it by copying the already-built AP (get_ap) and
+    # changing only the SSID.
+    password: "${ wifi_ap_password if wifi_ap_password is defined else 1/0 }"
+    ap_timeout: 30s
+
+captive_portal:
+
+esphome:
+  on_boot:
+    # Preserve the legacy fallback-AP SSID rule: a WiFi SSID is limited to 31 characters, so start
+    # from "criotive - <device_name>" and, when that overflows, drop the "criotive - " prefix FIRST;
+    # if the bare device name is still too long, keep its right-most 31 characters. Runs at a high
+    # priority so the AP is reconfigured before the WiFi component brings the access point up.
+    - priority: 600
+      then:
+        - lambda: |-
+            std::string name = App.get_name();
+            std::string ap_ssid = "criotive - " + name;
+            const size_t max_size = 31;
+            if (ap_ssid.length() > max_size) {
+              // First remove the "criotive - " prefix.
+              ap_ssid = name;
+              // If still too long, keep the right-most max_size characters.
+              if (ap_ssid.length() > max_size) {
+                ap_ssid = ap_ssid.substr(ap_ssid.length() - max_size);
+              }
+            }
+            // Copy the AP built from the config above (password + timeout already set, and escaped
+            // by codegen) and change only the SSID — never re-inject the password from YAML.
+            wifi::WiFiAP wifi_wifiap = wifi::global_wifi_component->get_ap();
+            wifi_wifiap.set_ssid(ap_ssid);
+            wifi::global_wifi_component->set_ap(wifi_wifiap);
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: WiFi IP Address
+      id: wifi_ip_address
+    ssid:
+      name: WiFi Connected SSID
+      id: wifi_connected_ssid
+    bssid:
+      name: WiFi Connected BSSID
+      id: wifi_bssid
+    mac_address:
+      name: WiFi Mac Address
+      id: wifi_mac
+
+sensor:
+  - platform: wifi_signal
+    id: wifi_signal_sensor
+    name: "WiFi Signal Sensor"
+    accuracy_decimals: 0
+    update_interval: 20s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+      - round: 0
+      - delta: 20%
