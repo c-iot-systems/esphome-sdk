@@ -1,0 +1,47 @@
+# Positive validate fixture for the hds_v1_1 board — imports the hardware module plus
+# core + wifi + criotive_mqtt + ota + diagnostics + controls at the REVISION UNDER TEST, and must
+# pass `esphome config`. One of the three configs release CI compiles for real.
+#
+# hds_v1_1's SW1 binary_sensor presses button_restart / button_factory, which controls.yaml owns,
+# so importing controls.yaml is what makes this board's on_click references resolve.
+#
+# The hardware module supplies the esp32: platform block, so there is NO inline hardware stub here.
+# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh
+# asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: hds-v1-1-testdev
+  firmware_version: "0.0.0-test"
+  # Override the hardware default (ALWAYS_ON) so the two v1 fixtures exercise both CAN termination
+  # modes: this board sits mid-bus and must NOT terminate.
+  can_resistor_status: ALWAYS_OFF
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/diagnostics.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
+        vars: {sdk_ref: __SDK_REF__}

@@ -1,0 +1,13 @@
+# hds_v2_0 — concrete board definition for the v2.0 board (ESP32-S3 revision).
+#
+# Board, variant and framework are CONCRETE (esp32-s3-devkitc-1 / esp32s3 / arduino) — never
+# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+#
+# The legacy v2.0 hardware definition declared only the platform block: no CAN termination switch,
+# no on-board button and no indicator LEDs, so this file owns no board I/O and no OTA visual
+# feedback. Slot pin maps live in the device config that consumes a slot, not in the board file.
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: arduino

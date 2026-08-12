@@ -1,0 +1,49 @@
+# Positive validate fixture — imports core + wifi + criotive_mqtt + ota at the REVISION UNDER TEST
+# plus an inline esp32 hardware stub, and must pass `esphome config` with no duplicate-id errors. CI
+# materializes the __SDK_REF__ placeholder (see tests/validate/README.md) into the PR head SHA before
+# running, so the branch's own modules are fetched from GitHub, never a published tag.
+# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+#
+# This fixture is the oracle for the cross-module rollback reference (criotive_mqtt on_connect ->
+# ota's script_rollback) and for the MQTT TLS trust anchor: `esphome config` output includes
+# `certificate_authority: ...` under `mqtt:`, proving TLS is configured rather than assumed.
+#
+# It is ALSO the oracle for "no MQTT log publishing by default": with no consumer `log_topic:` block,
+# `esphome config` output shows `log_topic: null` under `mqtt:` (not a re-injected `${device_name}/
+# debug` topic), proving criotive_mqtt.yaml disables log publishing. mqtt_log_optin.yaml covers the
+# opt-in counterpart.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: mqtt-ota-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+# Inline hardware stub — SDK-3 owns no hardware module, so the fixture supplies the platform itself.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
