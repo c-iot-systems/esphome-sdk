@@ -1,25 +1,28 @@
 # Positive validate fixture for the tca8418 optional-hardware module.
 #
-# Imports core.yaml + tca8418.yaml at the REVISION UNDER TEST (CI materializes the __SDK_REF__
+# Imports ONLY modules/tca8418.yaml at the REVISION UNDER TEST (CI materializes the __SDK_REF__
 # placeholder into the PR head SHA / release tag — see tests/validate/README.md), supplies an inline
-# esp32 hardware stub and an i2c bus, instantiates the expander, and — critically — CONSUMES a
+# esphome/esp32 stub and an i2c bus, instantiates the expander, and — critically — CONSUMES a
 # TCA8418GPIOPin on a binary_sensor. `esphome config` only validates Python/schema, but release CI
 # runs a real `esphome compile` over this fixture; a fixture that merely declared the `tca8418:`
 # component without using one of its pins would never compile the TCA8418GPIOPin implementation, so
 # a broken pin class could ship unnoticed. The binary_sensor below forces that path to build.
 #
-# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
-# Self-contained: literal test values for every required substitution. The repo is public, so no
-# value here is a real credential.
-substitutions:
-  device_name: tca8418-testdev
-  firmware_version: "0.0.0-test"
+# The fixture is deliberately self-contained (inline esphome/esp32 rather than importing core.yaml):
+# this optional driver needs no network, sntp or credentials, so pulling in core+wifi just to satisfy
+# core's sntp/network requirement would couple the fixture to modules it does not exercise. The one
+# thing it must exercise — the module's own external_components git source pinned to ${sdk_ref}, and
+# the packages/vars threading — it does. check-sdk-ref.sh asserts the package `ref` and every
+# `vars.sdk_ref` are the placeholder. The repo is public, so no value here is a real credential.
+esphome:
+  name: tca8418-testdev
 
-# Inline hardware stub — this optional module owns no hardware platform, so the fixture supplies it.
 esp32:
   board: esp32dev
   framework:
     type: arduino
+
+logger:
 
 # The expander is an I2C device (default address 0x34); tca8418 DEPENDS on i2c.
 i2c:
@@ -50,7 +53,5 @@ packages:
     url: https://github.com/c-iot-systems/esphome-sdk
     ref: __SDK_REF__
     files:
-      - path: modules/core.yaml
-        vars: {sdk_ref: __SDK_REF__}
       - path: modules/tca8418.yaml
         vars: {sdk_ref: __SDK_REF__}
