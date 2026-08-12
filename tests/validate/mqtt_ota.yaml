@@ -8,6 +8,11 @@
 # ota's script_rollback) and for the MQTT TLS trust anchor: `esphome config` output includes
 # `certificate_authority: ...` under `mqtt:`, proving TLS is configured rather than assumed.
 #
+# It is ALSO the oracle for "no MQTT log publishing by default": with no consumer `log_topic:` block,
+# `esphome config` output shows `log_topic: null` under `mqtt:` (not a re-injected `${device_name}/
+# debug` topic), proving criotive_mqtt.yaml disables log publishing. mqtt_log_optin.yaml covers the
+# opt-in counterpart.
+#
 # Self-contained: literal test values for every required substitution. The repo is public, so no
 # value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
 substitutions:
