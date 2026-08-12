@@ -1,0 +1,62 @@
+# hds_v1_1 — concrete board definition + pin map for the v1.1 board.
+#
+# Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino) — never
+# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+#
+# This board has no indicator LEDs, so it ships no OTA visual feedback (no module reaches into a
+# hardware id either way).
+#
+# Pin map:
+#   SW1          -> GPIO1    (on-board push button)
+#   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
+#
+# SW1 drives the STANDARD control buttons from controls.yaml (button_restart / button_factory) by
+# id — the hardware reaches into the module's public button ids, not the reverse. A device that
+# ships this board therefore imports controls.yaml. on_click is the explicit list form: three
+# separate click-length windows, each its own automation.
+#
+# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
+# segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
+# Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+substitutions:
+  can_resistor_status: ALWAYS_ON
+
+esp32:
+  board: esp32dev
+  variant: esp32
+  framework:
+    type: arduino
+
+binary_sensor:
+  - platform: gpio
+    pin: 1
+    name: "SW1"
+    internal: true
+    filters:
+      - invert
+    on_click:
+      - min_length: 100ms
+        max_length: 2s
+        then:
+          - logger.log: "Rebooting"
+          - delay: 1s
+          - button.press: button_restart
+      - min_length: 2s
+        max_length: 10s
+        then:
+          - logger.log: "WiFi Manager"
+          - delay: 1s
+          - button.press: button_factory  # TODO: start captive instead.
+      - min_length: 20s
+        max_length: 1000s
+        then:
+          - logger.log: "Factory"
+          - delay: 1s
+          - button.press: button_factory
+
+switch:
+  - platform: gpio
+    pin: 12
+    name: "CAN Resistor"
+    internal: true
+    restore_mode: ${can_resistor_status}

@@ -76,6 +76,7 @@ the modules it imports.
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
 | `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
+| `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
@@ -160,6 +161,53 @@ port, and a config that sets `8883` and no CA sends credentials in the clear. `c
 therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
 `certificate_authority`. The platform injects the broker's CA when generating the config, so staging
 and production can differ and the CA can rotate without an SDK release.
+
+### MQTT log publishing is off by default
+
+Legacy firmware never published logs to the broker — it had no `log_topic` at all. `criotive_mqtt.yaml`
+keeps that parity: **no device streams its logs to MQTT unless a consumer opts in.**
+
+This is not the same as omitting the key. ESPHome's `mqtt` component (`mqtt/__init__.py`,
+`validate_config`) **re-injects** a default `${topic_prefix}/debug` log topic (with `retain: true`)
+whenever a `topic_prefix` is set, so merely deleting `log_topic` would leave every device publishing
+its logs. Disabling requires the key to be **present but empty** — `log_topic:` with a null value —
+which drives the codegen branch `if not log_topic: disable_log_message()`. `esphome config` over
+`tests/validate/mqtt_ota.yaml` proves it: the dumped `mqtt:` shows `log_topic: null` and no `/debug`
+topic, the same standard by which the fixture proves the TLS `certificate_authority`.
+
+**Opting in (per device).** A consumer that wants a device's logs on the broker sets **two** things
+in that device's config: its own `mqtt: log_topic:` block (which merges over the module's null) **and**
+a non-`NONE` `logger_level`. Both are needed — the global `logger:` level gates which records are ever
+produced, so a `log_topic` with `logger_level: NONE` (the default) publishes nothing and the topic
+stays silent:
+
+```yaml
+substitutions:
+  logger_level: INFO   # or DEBUG/VERBOSE/VERY_VERBOSE — REQUIRED, or nothing is published
+mqtt:
+  log_topic:
+    topic: ${device_name}/debug
+    qos: 0
+    retain: false      # REQUIRED for a log topic — see below
+```
+
+`retain` **must be `false`** here. Retain is correct for birth / will / shutdown, where the retained
+message is the device's *current* online state a new subscriber should see immediately. A log topic
+is a rolling stream: each line overwrites the last, so a retained log topic makes the broker replay
+one arbitrary, stale log line to every new subscriber — never what a log consumer wants.
+`tests/validate/mqtt_log_optin.yaml` exercises this opt-in path.
+
+### OTA rollback watchdog is offline-safe
+
+`ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
+broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
+known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+`esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
+unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
+a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
+The watchdog is therefore gated on `ESP_OTA_IMG_PENDING_VERIFY` (ESP-IDF's own idiom in
+`esp_ota_begin`): only a freshly-flashed, not-yet-verified image can roll back; a confirmed,
+long-offline image is never touched. OTA safety is preserved and offline survival is guaranteed.
 
 ## `${sdk_ref}` — pinning the components with the YAML
 
@@ -250,21 +298,78 @@ restructuring the others.
 - `criotive_mqtt.yaml` — mqtt client, topic prefix, birth / last-will / shutdown messages,
   `on_connect`.
 - `ota.yaml` — `safe_mode`, both OTA platforms, `http_request`, ota_status, `perform_ota_update`,
-  rollback script.
+  rollback script. `perform_ota_update` only flashes a binary whose name starts with
+  `${device_name}_` (a build for another device is rejected into an error state). It picks the
+  download host by detecting a `.test` token in the requested version name — routing test builds to
+  the optional `ota_http_server_test` (default `${ota_http_server}`) and everything else to the
+  required `ota_http_server`. `.test` is matched only as a whole dotted segment, because version
+  names are sorted and `.test` is not necessarily the last suffix. The rollback watchdog armed on
+  boot here is cancelled by `criotive_mqtt.yaml`'s `on_connect` once the broker is reached.
 - `diagnostics.yaml` — `debug` platform, device info, reset reason.
 - `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
 - `location.yaml` — `google_location` and its `external_components`.
 
 ### Optional hardware modules
 
-A device imports one of these only if it has that hardware.
+A device imports one of these **only if it has that hardware** — they are drivers, not business
+logic, and are not replaceable by standard switches. Each module declares **only** its own
+`external_components` source (pinned to `${sdk_ref}`); it does **not** instantiate the component,
+because the instance is inherently device-specific (I2C address, UART bus, which pins, key layout).
+A device imports the module to make the driver available and then declares the instance in its own
+private config. Each has a validate fixture under `tests/validate/` that instantiates it, so release
+CI compiles the C++ at least once per release.
 
-- `tca8418.yaml` — I2C GPIO expander (`TCA8418GPIOPin`); a general capability, usable as a pin
-  source by any component.
-- `medeawiz.yaml` — serial video-player driver.
-- `phone.yaml` — prop driver.
+- **`tca8418.yaml` — TCA8418 I2C GPIO expander.** `TCA8418Component` extends
+  `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers `TCA8418GPIOPin` as a real
+  `GPIOPin`, adding 18 pins (ROW0–ROW7, COL0–COL9) over I2C that any component can use as a pin
+  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, not an
+  escape-room prop, and unrelated to ESPHome's native `matrix_keypad`/`key_collector` (those *scan*
+  a keypad matrix; this *provides* pins). **Import it when** a board runs short on native GPIO. The
+  component AUTO_LOADs `gpio_expander` and DEPENDS on `i2c`, so the device must also declare an
+  `i2c:` bus. Instantiate `tca8418:` with the board's address, then reference a pin as
+  `pin: {tca8418: <id>, number: 0-17, mode: {...}}`.
+- **`medeawiz.yaml` — MedeaWiz Sprite 4K serial video-player driver.** Controls a Sprite (DV-S4)
+  over its TTL serial port with a bespoke single-byte protocol (play file N, seek, volume,
+  request position/duration, end-of-file feedback); no ESPHome-native equivalent exists. **Import
+  it when** the device drives a MedeaWiz Sprite. DEPENDS on `uart`, so the device must declare a
+  `uart:` bus **with a tx pin** (the Sprite receives commands on tx). Instantiate `medeawiz:` on
+  that bus and use its actions (`medeawiz.play_file`, `medeawiz.seek`, …) and triggers
+  (`on_file`, `on_end_of_file`).
+- **`phone.yaml` — matrix-keypad "phone" prop driver.** Scans a keypad matrix (or individual column
+  buttons when no rows are given), debounces presses, tracks on/off-hook from an optional
+  `binary_sensor`, and matches typed sequences against configured passwords, firing right/wrong
+  triggers. No ESPHome-native component does this. **Import it when** the device drives a keypad
+  "phone" prop. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
+  they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
+  rows × columns), and any hook sensor / passwords / automations the prop needs.
 
 ### Hardware modules
 
-- `hds_v1_0.yaml`, `hds_v1_1.yaml`, `hds_v2_0.yaml` — concrete board/variant/framework and pin
-  maps. A hardware file owns its own OTA visual feedback; no module reaches into hardware ids.
+A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board, variant
+and framework are **concrete** — never `${DEVICE_BOARD}`/`${DEVICE_VARIANT}` templating. A device
+imports exactly one hardware module. The ESP32-only scope excludes the legacy `mr60bha2dev`, `r`,
+`esp12` and `nodemcu32` boards.
+
+| Module | board | variant | framework | board revision |
+|---|---|---|---|---|
+| `hds_v1_0.yaml` | `pico32` | `esp32` | `arduino` | v1.0 |
+| `hds_v1_1.yaml` | `esp32dev` | `esp32` | `arduino` | v1.1 |
+| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `arduino` | v2.0 (ESP32-S3) |
+
+- `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
+- `hds_v1_1.yaml` — on-board push button SW1 on GPIO1 and the CAN termination resistor on GPIO12.
+  SW1 presses the standard `controls.yaml` buttons (`button_restart` on a short click,
+  `button_factory` on longer holds), so a device with this board imports `controls.yaml`.
+- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board declared no on-board I/O.
+
+**CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
+termination resistor and own an optional `can_resistor_status` substitution (default `ALWAYS_ON`)
+that sets its restore mode. Only the two endpoint nodes of a CAN segment should terminate; a node
+wired mid-bus **must** override `can_resistor_status: ALWAYS_OFF`, or two terminators become three
+and the bus is corrupted. The two v1 validate fixtures exercise both values — `hds_v1_0` at the
+`ALWAYS_ON` default and `hds_v1_1` overriding to `ALWAYS_OFF`.
+
+**OTA visual feedback / LED ownership.** If a hardware file has indicator LEDs it owns its own OTA
+visual feedback and drives those LED ids itself — no module reaches into a hardware id. None of
+these three boards has indicator LEDs, so none ships OTA LED feedback and `ota.yaml` keeps no
+reference to any hardware id.

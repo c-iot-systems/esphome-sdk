@@ -17,5 +17,10 @@ fixture would fail on the missing `sdk_ref` instead of on the one input it is me
 `omit_sdk_ref.yaml` is the fixture that deliberately withholds it from `core.yaml`.
 
 Coverage owned by SDK-2 (core.yaml + wifi.yaml): omitting `device_name`, `firmware_version`,
-`sdk_ref`, `wifi_ssid`, `wifi_password` or `wifi_ap_password`. MQTT and OTA omissions belong to
-SDK-3, which owns those modules.
+`sdk_ref`, `wifi_ssid`, `wifi_password` or `wifi_ap_password`.
+
+Coverage owned by SDK-3 (criotive_mqtt.yaml + ota.yaml): omitting `mqtt_broker`,
+`mqtt_ca_certificate`, `mqtt_username`, `mqtt_password`, `ota_password` or `ota_http_server`. The
+MQTT/OTA fixtures import all four modules (core, wifi, criotive_mqtt, ota) so that the *only* missing
+input is the one under test — the failure is attributable to that substitution, not to an unresolved
+cross-module id (criotive_mqtt's `on_connect` references ota's `script_rollback`).

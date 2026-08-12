@@ -1,0 +1,28 @@
+# phone.yaml — matrix-keypad "phone" prop driver (optional hardware module).
+#
+# Declares ONLY the `phone` external component. A device imports this module to make the driver
+# available; it then instantiates `phone:` with the concrete row/column GPIO pins its board wires,
+# the key layout, and any hook sensor, passwords and on_key_press / on_hook / on_password_*
+# automations the prop needs. All of that is device-specific, so no `phone:` instance is declared in
+# this shared module.
+#
+# The driver scans a keypad matrix (or individual column buttons when no rows are given), debounces
+# key presses, tracks an on/off-hook state from an optional binary_sensor, and matches typed
+# sequences against configured passwords — firing right/wrong triggers and optionally publishing the
+# in-progress input to a text_sensor. There is no ESPHome-native component that does this, so the
+# driver is a real capability. Its row/column pins are plain `GPIOPin`s, so they may be backed by
+# native GPIO or by a tca8418.yaml expander pin.
+#
+# ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────
+# ESPHome treats `packages:` and `external_components:` as INDEPENDENT git sources: fetching this
+# module at `@<ref>` does NOT pass that ref to the external_components block below. So the source is
+# pinned to `${sdk_ref}` — the per-file `vars:` the consumer threads to every module — and the C++
+# component is fetched at the SAME revision as this YAML. A hard-coded ref here would let the C++
+# silently follow the default branch while the YAML is pinned; check-sdk-ref.sh enforces `${sdk_ref}`.
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref: ${sdk_ref}
+    components: [phone]
