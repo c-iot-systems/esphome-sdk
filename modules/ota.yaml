@@ -10,12 +10,36 @@
 # missing -> a hard `esphome config` failure naming the variable). See core.yaml's header / the
 # README; tests/negative/ proves each omission fails.
 #
-# ── Rollback watchdog ─────────────────────────────────────────────────────────────────────────
-# on_boot arms `script_rollback`: a 300s timer that, on ESP-IDF, marks the running image invalid and
-# reboots to the previous one. criotive_mqtt.yaml's on_connect cancels that timer and marks the image
+# ── Rollback watchdog (offline-survival audit — AIOT-98) ──────────────────────────────────────
+# on_boot arms `script_rollback`: a 300s timer that, on ESP-IDF, rolls the device back to the
+# previous image. criotive_mqtt.yaml's on_connect cancels that timer and marks the running image
 # valid once the broker is reached — reaching MQTT is the health signal that a freshly-flashed build
 # works. The script lives HERE; the cancel lives in criotive_mqtt.yaml and references it by id. On
-# the Arduino framework there is no rollback API, so both halves are no-ops (matches the legacy).
+# the Arduino framework there is no rollback API, so both halves are no-ops (matches the legacy,
+# whose devices ran DEVICE_FRAMEWORK: arduino — which is why legacy never hit the issue below).
+#
+# AUDIT (required by the offline-survival invariant — see core.yaml): may this watchdog reboot a
+# HEALTHY, CONFIRMED image that is merely long-offline? It fires 300s after EVERY boot unless MQTT
+# connects, so the risk window is the 5 minutes after any power-cycle — precisely the freezer-during-
+# an-outage case (mains returns, site network still down). The reboot call is the crux. Read against
+# ESP-IDF (esp_ota_ops.c), `esp_ota_mark_app_invalid_rollback_and_reboot()` calls
+# `esp_ota_current_ota_is_workable(false)`, whose `valid == false` branch does NOT inspect the
+# running partition's OTA state: as long as the app runs from an OTA slot and
+# `esp_ota_check_rollback_is_possible()` is true (a bootable app sits in the other slot — true for any
+# device OTA-updated at least once), it marks the CURRENT partition INVALID and `esp_restart()`s —
+# even a partition already ESP_OTA_IMG_VALID. So the UNGUARDED call WOULD roll back and reboot a
+# confirmed, healthy device that power-cycles and cannot reach the broker within 300s: a connectivity-
+# driven reboot AND a silent firmware downgrade — a VIOLATION of the invariant. (Inert on Arduino;
+# live on ESP-IDF, which the SDK targets.)
+#
+# FIX: gate the rollback on the running image genuinely being pending post-OTA verification —
+# `esp_ota_get_state_partition(running) == ESP_OTA_IMG_PENDING_VERIFY` — mirroring ESP-IDF's own
+# idiom in `esp_ota_begin` (esp_ota_ops.c:139-143). A confirmed image (ESP_OTA_IMG_VALID), which is
+# the state of any device that reached the broker at least once since its last OTA, is NEVER
+# invalidated by this watchdog; only a freshly-flashed image still awaiting its first successful
+# broker connection can roll back — the watchdog's intended purpose. OTA safety is preserved (a bad
+# OTA that never reaches the broker still rolls back) while a healthy device survives indefinite
+# offline operation.
 #
 # ── Test/prod OTA host selection ──────────────────────────────────────────────────────────────
 # The legacy chose between a PROD and an HMG (test) download host by detecting a `.test` token in the
@@ -41,7 +65,10 @@
 # the only OTA-trigger path.
 
 substitutions:
-  ota_attempts: "5"
+  # 50 safe-mode boot attempts before giving up — matches legacy OTA_ATTEMPTS. ESPHome's stock
+  # default is 5, which surrenders 10x sooner; a field device on a flaky uplink deserves the larger
+  # recovery budget. Overridable per device.
+  ota_attempts: "50"
   # Optional test/staging OTA host; defaults to the single required prod host (see header).
   ota_http_server_test: ${ota_http_server}
 
@@ -148,5 +175,17 @@ script:
       - delay: 300s
       - lambda: |-
           #ifdef USE_ESP_IDF
-            esp_ota_mark_app_invalid_rollback_and_reboot();
+            // Offline-survival guard (AIOT-98, see header): roll back ONLY an image still pending
+            // post-OTA verification. esp_ota_mark_app_invalid_rollback_and_reboot() does NOT check
+            // the OTA state itself and would invalidate+reboot even a CONFIRMED image whenever a
+            // rollback target exists — so a healthy, long-offline device that power-cycles and can't
+            // reach the broker within 300s would be rolled back. Gating on ESP_OTA_IMG_PENDING_VERIFY
+            // (ESP-IDF's own idiom in esp_ota_begin) means a confirmed image is never touched here;
+            // only a freshly-flashed, not-yet-verified image can roll back — the watchdog's purpose.
+            const esp_partition_t *running = esp_ota_get_running_partition();
+            esp_ota_img_states_t ota_state;
+            if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+                ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+              esp_ota_mark_app_invalid_rollback_and_reboot();
+            }
           #endif
