@@ -147,15 +147,20 @@ which drives the codegen branch `if not log_topic: disable_log_message()`. `esph
 `tests/validate/mqtt_ota.yaml` proves it: the dumped `mqtt:` shows `log_topic: null` and no `/debug`
 topic, the same standard by which the fixture proves the TLS `certificate_authority`.
 
-**Opting in (per device).** A consumer that wants a device's logs on the broker adds its own
-`mqtt: log_topic:` block in that device's config; it merges over the module's null:
+**Opting in (per device).** A consumer that wants a device's logs on the broker sets **two** things
+in that device's config: its own `mqtt: log_topic:` block (which merges over the module's null) **and**
+a non-`NONE` `logger_level`. Both are needed — the global `logger:` level gates which records are ever
+produced, so a `log_topic` with `logger_level: NONE` (the default) publishes nothing and the topic
+stays silent:
 
 ```yaml
+substitutions:
+  logger_level: INFO   # or DEBUG/VERBOSE/VERY_VERBOSE — REQUIRED, or nothing is published
 mqtt:
   log_topic:
     topic: ${device_name}/debug
     qos: 0
-    retain: false   # REQUIRED for a log topic — see below
+    retain: false      # REQUIRED for a log topic — see below
 ```
 
 `retain` **must be `false`** here. Retain is correct for birth / will / shutdown, where the retained
