@@ -1,0 +1,19 @@
+# NEGATIVE — MUST FAIL. Supplies every top-level substitution but withholds the per-file
+# `vars: {sdk_ref: ...}` from core.yaml. sdk_ref is required by core.yaml (it is threaded through
+# each module's `vars:`, not the top-level substitutions), so core's guard must make this fail.
+substitutions:
+  device_name: neg-device
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+packages:
+  # core is included WITHOUT vars.sdk_ref — this is the omission under test.
+  core: !include ../../modules/core.yaml
+  wifi: !include { file: ../../modules/wifi.yaml, vars: {sdk_ref: local-test} }

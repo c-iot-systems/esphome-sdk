@@ -36,9 +36,10 @@
 #
 # sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
 # propagate a package `ref` into a module's own `external_components:` block. core.yaml and wifi.yaml
-# carry no components, so they do not consume ${sdk_ref} yet — but the contract requires it because
-# component-bearing modules (e.g. location.yaml) do, and check-sdk-ref.sh enforces that every
-# validate fixture threads it. It is required by convention, not by a missing-default failure here.
+# carry no components, so they do not otherwise consume ${sdk_ref}, but core.yaml GUARDS it (in
+# esphome.comment below) so a consumer that forgets `vars: {sdk_ref: ...}` fails validation — it is
+# required, not merely conventional. check-sdk-ref.sh additionally enforces that every validate
+# fixture threads the same ref into the package `ref` and each module's `vars.sdk_ref`.
 #
 # This module OWNS: esphome:, device identity, the firmware_version text sensor, the boot counter,
 # preferences, logger and sntp time. Optional inputs it owns (logger_level) get a default below;
@@ -52,18 +53,26 @@
 # schema. So referencing a substitution is NOT enough to make it required.
 #   - device_name lands in `esphome: name:`, whose identifier schema rejects the leftover
 #     `${device_name}` literal, so omitting it already fails — no extra guard needed.
-#   - firmware_version (and wifi.yaml's credentials) land in free-form string fields that accept
-#     the literal, so each is wrapped in the guard `${ x if x is defined else 1/0 }`: when the
-#     value is present the expression returns it unchanged; when it is missing the ZeroDivisionError
-#     surfaces as a hard `cv.Invalid` (the non-strict pass demotes UndefinedError to a warning but
-#     re-raises every other expression error), so `esphome config` exits non-zero with the offending
-#     expression — which names the variable — in the message. tests/negative/ proves each case.
+#   - firmware_version, sdk_ref (esphome.comment, below) and wifi.yaml's credentials land in
+#     free-form string fields that accept the literal, so each is wrapped in the guard
+#     `${ x if x is defined else 1/0 }`: when the value is present the expression returns it
+#     unchanged; when it is missing the ZeroDivisionError surfaces as a hard `cv.Invalid` (the
+#     non-strict pass demotes UndefinedError to a warning but re-raises every other expression
+#     error), so `esphome config` exits non-zero with the offending expression — which names the
+#     variable — in the message. tests/negative/ proves each case.
 
 substitutions:
   logger_level: INFO
 
 esphome:
   name: ${device_name}
+  # Records AND enforces the SDK ref this firmware was built from. sdk_ref is threaded through the
+  # per-file `vars:` a consumer passes to every module (ESPHome does not propagate a package ref
+  # into a module's own external_components). core.yaml carries no components, so nothing else here
+  # consumes it — guarding it in this mandatory module is what makes a consumer that forgets
+  # `vars: {sdk_ref: ...}` fail `esphome config` (see the guard-idiom note above), and it doubles as
+  # build provenance in the generated config.
+  comment: "criotive SDK ${ sdk_ref if sdk_ref is defined else 1/0 }"
   on_boot:
     - priority: 600
       then:

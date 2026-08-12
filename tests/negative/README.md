@@ -9,9 +9,13 @@ every file here and fails if any one succeeds; it is wired into `validate.yml`.
 Unlike the positive fixtures in `tests/validate/`, these import the modules with a **local
 `!include`** (`../../modules/*.yaml`) rather than the GitHub `packages:` path. That keeps them
 hermetic — they exercise the contract with no network fetch and no `__SDK_REF__` materialization, so
-they run identically locally and in CI. The modules under test carry no `external_components`, so no
-`${sdk_ref}` threading is needed here (`check-sdk-ref.sh` does not scan this directory).
+they run identically locally and in CI (`check-sdk-ref.sh` does not scan this directory).
+
+Every fixture except `omit_sdk_ref.yaml` threads `vars: {sdk_ref: local-test}` into the includes,
+because `sdk_ref` is itself a required substitution (guarded in `core.yaml`): without it, *every*
+fixture would fail on the missing `sdk_ref` instead of on the one input it is meant to test.
+`omit_sdk_ref.yaml` is the fixture that deliberately withholds it from `core.yaml`.
 
 Coverage owned by SDK-2 (core.yaml + wifi.yaml): omitting `device_name`, `firmware_version`,
-`wifi_ssid`, `wifi_password` or `wifi_ap_password`. MQTT and OTA omissions belong to SDK-3, which
-owns those modules.
+`sdk_ref`, `wifi_ssid`, `wifi_password` or `wifi_ap_password`. MQTT and OTA omissions belong to
+SDK-3, which owns those modules.
