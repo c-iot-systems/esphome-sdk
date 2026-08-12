@@ -167,7 +167,10 @@ void Phone::check_timeout_() {
   if (this->input_.empty()) return;
   if (millis() - this->last_key_time_ < this->sequence_timeout_) return;
 
-  ESP_LOGD(TAG, "Sequence timeout, input: %s", this->input_.c_str());
+  // Do not log the accumulated input: it is matched against configured passwords, so it is
+  // sensitive. Log only its length as a non-secret diagnostic (no-secrets-in-logs).
+  ESP_LOGD(TAG, "Sequence timeout after %u character(s)",
+           static_cast<unsigned>(this->input_.length()));
   this->validate_input_();
   this->clear_input_();
 }
@@ -191,7 +194,11 @@ void Phone::clear_input_() {
 
 void Phone::publish_input_() {
 #ifdef USE_TEXT_SENSOR
-  if (this->input_.empty()) return;
+  // Publish the current input to every configured text sensor, INCLUDING when it is empty:
+  // clear_input_() (clear key, enter key, timeout, on-hook) empties input_ and calls this to
+  // reflect the cleared state. Returning early on an empty value would leave the previous input
+  // (a password attempt) displayed indefinitely, contradicting the in-progress-input behaviour
+  // and retaining sensitive data.
   for (auto& entry : this->passwords_) {
     if (entry.text_sensor != nullptr) {
       entry.text_sensor->publish_state(this->input_);
