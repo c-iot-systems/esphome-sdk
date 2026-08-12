@@ -320,5 +320,31 @@ A device imports one of these only if it has that hardware.
 
 ### Hardware modules
 
-- `hds_v1_0.yaml`, `hds_v1_1.yaml`, `hds_v2_0.yaml` — concrete board/variant/framework and pin
-  maps. A hardware file owns its own OTA visual feedback; no module reaches into hardware ids.
+A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board, variant
+and framework are **concrete** — never `${DEVICE_BOARD}`/`${DEVICE_VARIANT}` templating. A device
+imports exactly one hardware module. The ESP32-only scope excludes the legacy `mr60bha2dev`, `r`,
+`esp12` and `nodemcu32` boards.
+
+| Module | board | variant | framework | board revision |
+|---|---|---|---|---|
+| `hds_v1_0.yaml` | `pico32` | `esp32` | `arduino` | v1.0 |
+| `hds_v1_1.yaml` | `esp32dev` | `esp32` | `arduino` | v1.1 |
+| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `arduino` | v2.0 (ESP32-S3) |
+
+- `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
+- `hds_v1_1.yaml` — on-board push button SW1 on GPIO1 and the CAN termination resistor on GPIO12.
+  SW1 presses the standard `controls.yaml` buttons (`button_restart` on a short click,
+  `button_factory` on longer holds), so a device with this board imports `controls.yaml`.
+- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board declared no on-board I/O.
+
+**CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
+termination resistor and own an optional `can_resistor_status` substitution (default `ALWAYS_ON`)
+that sets its restore mode. Only the two endpoint nodes of a CAN segment should terminate; a node
+wired mid-bus **must** override `can_resistor_status: ALWAYS_OFF`, or two terminators become three
+and the bus is corrupted. The two v1 validate fixtures exercise both values — `hds_v1_0` at the
+`ALWAYS_ON` default and `hds_v1_1` overriding to `ALWAYS_OFF`.
+
+**OTA visual feedback / LED ownership.** If a hardware file has indicator LEDs it owns its own OTA
+visual feedback and drives those LED ids itself — no module reaches into a hardware id. None of
+these three boards has indicator LEDs, so none ships OTA LED feedback and `ota.yaml` keeps no
+reference to any hardware id.
