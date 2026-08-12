@@ -77,11 +77,30 @@ the modules it imports.
 | `ota_attempts` | no | `5` | safe-mode attempts |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
 | `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
-| `logger_level` | no | `INFO` | |
+| `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
 device that forgets to override it. A missing required substitution must fail validation loudly, and
 the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+
+### Logging is off in production by default
+
+`logger_level` defaults to **`NONE`**: a device ships silent and its `logger:` emits nothing until a
+consumer raises the level **deliberately**. This mirrors the legacy firmware, whose ESPHome baseline
+was `LOGGER_LEVEL: "NONE"` and was only raised by opting into a named environment
+(`info` / `debug` / `verbose` / `veryverbose`) — never on by default. A chatty default is not free:
+it costs flash, CPU and (when a device also publishes logs) broker traffic on every unit that forgot
+to turn it down.
+
+To raise it, set the substitution per device to one of ESPHome's levels — `INFO`, `DEBUG`,
+`VERBOSE` or `VERY_VERBOSE`:
+
+```yaml
+substitutions:
+  logger_level: DEBUG   # opt in per device; production stays NONE
+```
+
+The knob is unchanged — only its default flipped from `INFO` back to `NONE`.
 
 ### Required substitutions fail loudly — the guard idiom
 
@@ -114,6 +133,36 @@ port, and a config that sets `8883` and no CA sends credentials in the clear. `c
 therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
 `certificate_authority`. The platform injects the broker's CA when generating the config, so staging
 and production can differ and the CA can rotate without an SDK release.
+
+### MQTT log publishing is off by default
+
+Legacy firmware never published logs to the broker — it had no `log_topic` at all. `criotive_mqtt.yaml`
+keeps that parity: **no device streams its logs to MQTT unless a consumer opts in.**
+
+This is not the same as omitting the key. ESPHome's `mqtt` component (`mqtt/__init__.py`,
+`validate_config`) **re-injects** a default `${topic_prefix}/debug` log topic (with `retain: true`)
+whenever a `topic_prefix` is set, so merely deleting `log_topic` would leave every device publishing
+its logs. Disabling requires the key to be **present but empty** — `log_topic:` with a null value —
+which drives the codegen branch `if not log_topic: disable_log_message()`. `esphome config` over
+`tests/validate/mqtt_ota.yaml` proves it: the dumped `mqtt:` shows `log_topic: null` and no `/debug`
+topic, the same standard by which the fixture proves the TLS `certificate_authority`.
+
+**Opting in (per device).** A consumer that wants a device's logs on the broker adds its own
+`mqtt: log_topic:` block in that device's config; it merges over the module's null:
+
+```yaml
+mqtt:
+  log_topic:
+    topic: ${device_name}/debug
+    qos: 0
+    retain: false   # REQUIRED for a log topic — see below
+```
+
+`retain` **must be `false`** here. Retain is correct for birth / will / shutdown, where the retained
+message is the device's *current* online state a new subscriber should see immediately. A log topic
+is a rolling stream: each line overwrites the last, so a retained log topic makes the broker replay
+one arbitrary, stale log line to every new subscriber — never what a log consumer wants.
+`tests/validate/mqtt_log_optin.yaml` exercises this opt-in path.
 
 ## `${sdk_ref}` — pinning the components with the YAML
 
