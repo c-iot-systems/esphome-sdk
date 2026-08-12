@@ -23,6 +23,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The CI placeholder every validate fixture must carry; CI materializes it into the revision
+# under test. A concrete ref in a fixture would pin PR/release CI to a published release.
+PLACEHOLDER='__SDK_REF__'
+# The SDK's own repo slug, used to scope package-shorthand ( github://owner/repo...@ref ) matching
+# to the SDK — a fixture may legitimately pull an unrelated third-party package at a pinned tag.
+SDK_REPO='c-iot-systems/esphome-sdk'
+
 # Strip surrounding quotes, inline comments and flow-mapping punctuation from a captured YAML
 # scalar. A trailing flow close-brace is dropped only when it is NOT part of a ${...} expansion,
 # so `${sdk_ref}` survives intact while `v0.1.0}` (from `{..., ref: v0.1.0}`) becomes `v0.1.0`.
@@ -38,62 +45,92 @@ _clean_value() {
   printf '%s' "$v"
 }
 
-# Check A: package ref == every sdk_ref, for one validate config file.
+# Emit every explicit `ref:` scalar (block or flow, quoted or with whitespace before the colon),
+# one per line. The `(^|[^A-Za-z0-9_])` boundary keeps `sdk_ref:` from matching the `ref:` key.
+_extract_refs() {
+  grep -oE "(^|[^A-Za-z0-9_])['\"]?ref['\"]?[[:space:]]*:[[:space:]]*[^,}[:space:]]+" "$1" \
+    | sed -E 's/.*:[[:space:]]*//'
+}
+
+# Emit every `sdk_ref:` scalar (block `sdk_ref: X` or flow `{sdk_ref: X}`), one per line.
+_extract_sdk_refs() {
+  grep -oE "(^|[^A-Za-z0-9_])['\"]?sdk_ref['\"]?[[:space:]]*:[[:space:]]*[^,}[:space:]]+" "$1" \
+    | sed -E 's/.*:[[:space:]]*//'
+}
+
+# Emit the ref pinned by every SDK-repo package/component shorthand ( github|gitlab://<SDK>...@ref ),
+# one per line. Scoped to the SDK repo so an unrelated third-party pinned package is left alone.
+_extract_sdk_shorthand_refs() {
+  grep -oE "(github|gitlab)://${SDK_REPO}[^[:space:]'\"},]*@[^[:space:]'\"},]+" "$1" \
+    | sed -E 's/.*@//'
+}
+
+# Check A: every SDK reference in a validate fixture must be the CI placeholder. This subsumes the
+# old package-ref==sdk_ref consistency check and additionally rejects (a) a fixture with no SDK
+# reference at all — vacuously "consistent" but exercising nothing — and (b) a fixture pinned to a
+# concrete release via an explicit ref, a threaded sdk_ref, or a github/gitlab package shorthand.
 check_validate_file() {
-  local file="$1" rc=0 line key val
-  local pkg_ref="" have_ref=0
-  local -a sdk_refs=()
+  local file="$1" rc=0 val
+  local -a refs=() sdk_refs=() shorts=()
 
-  while IFS= read -r line; do
-    # package ref: a top-of-block `ref:` scalar that is not the ${sdk_ref} placeholder
-    if [[ "$line" =~ ^[[:space:]]*ref:[[:space:]]*(.+)$ ]]; then
-      val="$(_clean_value "${BASH_REMATCH[1]}")"
-      if [[ "$val" != '${sdk_ref}' && -n "$val" ]]; then
-        if [[ "$have_ref" -eq 1 && "$val" != "$pkg_ref" ]]; then
-          echo "$file: multiple differing package refs ('$pkg_ref' vs '$val')"; rc=1
-        fi
-        pkg_ref="$val"; have_ref=1
-      fi
-    fi
-    # sdk_ref: matches both `vars: {sdk_ref: X}` and a block `sdk_ref: X`
-    if [[ "$line" =~ sdk_ref:[[:space:]]*([^},[:space:]]+) ]]; then
-      sdk_refs+=("$(_clean_value "${BASH_REMATCH[1]}")")
-    fi
-  done <"$file"
+  while IFS= read -r val; do [[ -n "$val" ]] && refs+=("$(_clean_value "$val")"); done < <(_extract_refs "$file")
+  while IFS= read -r val; do [[ -n "$val" ]] && sdk_refs+=("$(_clean_value "$val")"); done < <(_extract_sdk_refs "$file")
+  while IFS= read -r val; do [[ -n "$val" ]] && shorts+=("$(_clean_value "$val")"); done < <(_extract_sdk_shorthand_refs "$file")
 
-  if [[ "${#sdk_refs[@]}" -eq 0 ]]; then
-    if [[ "$have_ref" -eq 1 ]]; then
-      # A package ref with no vars.sdk_ref means the ref is never threaded to any module's
-      # external_components — the component would silently follow the default branch.
-      echo "$file: declares a package ref but no vars.sdk_ref to thread it to modules"; return 1
-    fi
-    return 0    # not an SDK-consuming config; nothing to bind
+  local n_pkg=$(( ${#refs[@]} + ${#shorts[@]} ))
+  if [[ "$n_pkg" -eq 0 && "${#sdk_refs[@]}" -eq 0 ]]; then
+    echo "$file: no SDK reference — a validate fixture must consume the SDK at the ${PLACEHOLDER} placeholder"
+    return 1
   fi
-  if [[ "$have_ref" -eq 0 ]]; then
+  if [[ "$n_pkg" -eq 0 ]]; then
     echo "$file: has vars.sdk_ref but no package ref: to bind it to"; return 1
   fi
-  for val in "${sdk_refs[@]}"; do
-    if [[ "$val" != "$pkg_ref" ]]; then
-      echo "$file: vars.sdk_ref '$val' != package ref '$pkg_ref'"; rc=1
+  if [[ "${#sdk_refs[@]}" -eq 0 ]]; then
+    # A package ref with no vars.sdk_ref means the ref is never threaded to any module's
+    # external_components — the component would silently follow the default branch.
+    echo "$file: declares a package ref but no vars.sdk_ref to thread it to modules"; return 1
+  fi
+  for val in "${refs[@]}" "${shorts[@]}" "${sdk_refs[@]}"; do
+    if [[ "$val" != "$PLACEHOLDER" ]]; then
+      echo "$file: SDK ref '$val' must be the ${PLACEHOLDER} placeholder (CI materializes the revision under test)"; rc=1
     fi
   done
   return "$rc"
 }
 
-# Check B: every ref: in a module/hardware file must be exactly ${sdk_ref}. Handles both block
-# style ( "  ref: ${sdk_ref}" ) and flow style ( "source: {type: git, ..., ref: v0.1.0}" ). The
-# `(^|[^A-Za-z0-9_])` boundary keeps `sdk_ref:` (a substitution name) from matching the `ref:` key.
+# Check B: every external_components ref in a module/hardware file must be exactly ${sdk_ref}.
+# `${sdk_ref}` is first substituted to a brace-free sentinel so flow-map close braces do not
+# confuse parsing; then two ref spellings are inspected against it:
+#   (a) an explicit `ref:` key — block ( "  ref: v0.1.0" ), flow ( "{..., ref: v0.1.0}" ),
+#       quoted ( "'ref': v0.1.0" ), or with whitespace before the colon ( "ref : v0.1.0" ); and
+#   (b) a github/gitlab source shorthand that pins a ref via @<ref> ( "github://owner/repo@tag" ).
 check_module_file() {
-  local file="$1" rc=0 raw val
+  local file="$1" rc=0 val sub
   local ok='__SDKREF_OK__'   # brace-free stand-in so flow-map close braces do not confuse parsing
-  while IFS= read -r raw; do
-    val="$(_clean_value "$raw")"
+  sub="$(sed 's/\${sdk_ref}/'"$ok"'/g' "$file")"
+
+  # (a) explicit ref: keys, all spellings.
+  while IFS= read -r val; do
+    [[ -z "$val" ]] && continue
+    val="$(_clean_value "$val")"
     if [[ "$val" != "$ok" ]]; then
       echo "$file: hard-coded external_components ref '$val' — must be \${sdk_ref}"; rc=1
     fi
-  done < <(sed 's/\${sdk_ref}/'"$ok"'/g' "$file" \
-             | grep -oE '(^|[^A-Za-z0-9_])ref:[[:space:]]*[^,[:space:]]+' \
-             | sed -E 's/.*ref:[[:space:]]*//')
+  done < <(printf '%s\n' "$sub" \
+             | grep -oE "(^|[^A-Za-z0-9_])['\"]?ref['\"]?[[:space:]]*:[[:space:]]*[^,}[:space:]]+" \
+             | sed -E 's/.*:[[:space:]]*//')
+
+  # (b) github/gitlab shorthand sources that pin a ref via @<ref> (any repo — a module must fetch
+  #     every component at ${sdk_ref}, never a hard-coded tag/branch/sha).
+  while IFS= read -r val; do
+    [[ -z "$val" ]] && continue
+    val="$(_clean_value "$val")"
+    if [[ "$val" != "$ok" ]]; then
+      echo "$file: hard-coded external_components ref '$val' in a github/gitlab shorthand — must be \${sdk_ref}"; rc=1
+    fi
+  done < <(printf '%s\n' "$sub" \
+             | grep -oE "(github|gitlab)://[^[:space:]'\"},]*@[^[:space:]'\"},]+" \
+             | sed -E 's/.*@//')
   return "$rc"
 }
 
@@ -217,6 +254,134 @@ YAML
     echo "self-test: FAILED — package ref without vars.sdk_ref was NOT rejected"; rc=1
   else
     echo "self-test: PASS on bad fixture (package ref without vars.sdk_ref rejected) — ok"
+  fi
+
+  # ---- Round-2 hardening: valid YAML spellings, shorthand sources, vacuous fixtures ----
+  # Restore both sides to a known-good baseline first.
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+YAML
+
+  # BAD 5: a module hard-codes a component ref via GitHub shorthand ( source: github://...@tag ).
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source: github://c-iot-systems/esphome-sdk@v0.1.0
+    components: [google_location]
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — hard-coded github-shorthand ref was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (github-shorthand ref rejected) — ok"
+  fi
+
+  # GOOD: the same shorthand threaded through ${sdk_ref} must pass.
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source: github://c-iot-systems/esphome-sdk@${sdk_ref}
+    components: [google_location]
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo 'self-test: PASS on good fixture (github-shorthand @${sdk_ref} accepted) — ok'
+  else
+    echo 'self-test: FAILED — github-shorthand @${sdk_ref} was rejected'; rc=1
+  fi
+
+  # BAD 6: a module ref key with whitespace before the colon ( ref : v0.1.0 ).
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref : v0.1.0
+    components: [google_location]
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — spaced ref key was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (spaced ref key rejected) — ok"
+  fi
+
+  # BAD 7: a module ref key that is quoted ( 'ref': v0.1.0 ).
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      'ref': v0.1.0
+    components: [google_location]
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — quoted ref key was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (quoted ref key rejected) — ok"
+  fi
+  # restore a good module for the validate-side cases
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source: {type: git, url: https://github.com/c-iot-systems/esphome-sdk, ref: ${sdk_ref}}
+    components: [google_location]
+YAML
+
+  # BAD 8: a validate fixture with no SDK reference at all (previously a vacuous pass).
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+esphome:
+  name: no-sdk-here
+esp32:
+  board: esp32dev
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — validate fixture with no SDK ref was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (no-SDK-ref validate config rejected) — ok"
+  fi
+
+  # BAD 9: a validate fixture that pins a release via package shorthand ( @v0.1.0 ).
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+packages:
+  criotive: github://c-iot-systems/esphome-sdk/modules/core.yaml@v0.1.0
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — release-pinned shorthand validate fixture was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (release-pinned shorthand validate config rejected) — ok"
+  fi
+
+  # BAD 10: a validate fixture whose refs are internally consistent but concrete (pin a release).
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: v0.1.0
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: v0.1.0}
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — concrete (non-placeholder) validate refs were NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (concrete non-placeholder validate refs rejected) — ok"
+  fi
+
+  # GOOD: a fixture carrying the placeholder in both the package ref and a threaded sdk_ref passes.
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: PASS on good fixture (placeholder package ref + threaded sdk_ref) — ok"
+  else
+    echo "self-test: FAILED — good placeholder fixture was rejected"; rc=1
   fi
 
   rm -rf "$tmp"
