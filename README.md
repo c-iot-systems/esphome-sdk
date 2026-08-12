@@ -224,5 +224,26 @@ A device imports one of these only if it has that hardware.
 
 ### Hardware modules
 
-- `hds_v1_0.yaml`, `hds_v1_1.yaml`, `hds_v2_0.yaml` — concrete board/variant/framework and pin
-  maps. A hardware file owns its own OTA visual feedback; no module reaches into hardware ids.
+A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board, variant
+and framework are **concrete** — never `${DEVICE_BOARD}`/`${DEVICE_VARIANT}` templating. A device
+imports exactly one hardware module. Names were renamed from the legacy `ciot_*`; the legacy names
+do not appear in the SDK, and the ESP32-only scope excludes the legacy `mr60bha2dev`, `r`, `esp12`
+and `nodemcu32` boards.
+
+| Module | board | variant | framework | ported from |
+|---|---|---|---|---|
+| `hds_v1_0.yaml` | `pico32` | `esp32` | `arduino` | legacy `ciot_v1_0` |
+| `hds_v1_1.yaml` | `esp32dev` | `esp32` | `arduino` | legacy `ciot_v1_1` |
+| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `arduino` | legacy `ciot_v2_0` |
+
+- `hds_v1_0.yaml` — CAN termination resistor on GPIO12 (`ALWAYS_ON`).
+- `hds_v1_1.yaml` — on-board push button SW1 on GPIO1 and the CAN termination resistor on GPIO12
+  (`ALWAYS_ON`). SW1 presses the standard `controls.yaml` buttons (`button_restart` on a short
+  click, `button_factory` on longer holds), so a device with this board imports `controls.yaml`.
+- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the legacy board declared no on-board I/O.
+
+**OTA visual feedback / LED ownership.** If a hardware file has indicator LEDs it owns its own OTA
+visual feedback and drives those LED ids itself — no module reaches into a hardware id. None of
+these three boards has indicator LEDs (the legacy blink-on-OTA animation was gated on
+`#ifdef HARDWARE_FREEZER`, a board that is out of scope here), so none ships OTA LED feedback; the
+`ota.yaml` module keeps no reference to any hardware id.

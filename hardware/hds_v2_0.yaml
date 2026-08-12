@@ -1,0 +1,14 @@
+# hds_v2_0 — concrete board definition, ported from legacy config/hardwares/ciot_v2_0.
+#
+# Board, variant and framework are CONCRETE (esp32-s3-devkitc-1 / esp32s3 / arduino, from
+# ciot_v2_0/hardware_config.json) — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. This is the
+# ESP32-S3 revision.
+#
+# The legacy ciot_v2_0/hardware.yaml declared only the platform block: no CAN termination switch,
+# no on-board button and no indicator LEDs, so this file owns no board I/O and no OTA visual
+# feedback. Slot pin maps live in the device config that consumes a slot, not in the board file.
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: arduino

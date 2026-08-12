@@ -1,0 +1,55 @@
+# hds_v1_1 — concrete board definition + pin map, ported from legacy config/hardwares/ciot_v1_1.
+#
+# Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino, from
+# ciot_v1_1/hardware_config.json) — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+#
+# This board has no indicator LEDs, so it owns no OTA visual feedback (the legacy LED animation was
+# gated on #ifdef HARDWARE_FREEZER — a different board — and is not ported).
+#
+# Pin map (legacy ciot_v1_1):
+#   SW1          -> GPIO1    (hardware_config.json GPIO_SW1; on-board push button)
+#   CAN RESISTOR -> GPIO12   (core.json fixed "Power" slot; ALWAYS_ON termination)
+#
+# SW1 drives the STANDARD control buttons from controls.yaml (button_restart / button_factory) by
+# id — the hardware reaches into the module's public button ids, not the reverse. A device that
+# ships this board therefore imports controls.yaml. on_click is the explicit list form: three
+# separate click-length windows, each its own automation.
+esp32:
+  board: esp32dev
+  variant: esp32
+  framework:
+    type: arduino
+
+binary_sensor:
+  - platform: gpio
+    pin: 1
+    name: "SW1"
+    internal: true
+    filters:
+      - invert
+    on_click:
+      - min_length: 100ms
+        max_length: 2s
+        then:
+          - logger.log: "Rebooting"
+          - delay: 1s
+          - button.press: button_restart
+      - min_length: 2s
+        max_length: 10s
+        then:
+          - logger.log: "WiFi Manager"
+          - delay: 1s
+          - button.press: button_factory  # TODO: start captive instead.
+      - min_length: 20s
+        max_length: 1000s
+        then:
+          - logger.log: "Factory"
+          - delay: 1s
+          - button.press: button_factory
+
+switch:
+  - platform: gpio
+    pin: 12
+    name: "CAN Resistor"
+    internal: true
+    restore_mode: ALWAYS_ON
