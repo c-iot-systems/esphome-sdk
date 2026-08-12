@@ -24,16 +24,20 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# True iff $1 is a zero-valued duration: a leading numeric run that is all zeros ("0", "0s", "00ms").
-# A value with no leading digit (e.g. an unresolved "${x}") is NOT zero.
+# True iff $1 is a zero-valued duration. The numeric part is everything up to the first unit letter
+# and MAY carry a decimal point — ESPHome accepts fractional durations (e.g. 0.5s). Zero iff the
+# numeric part contains a digit and NO non-zero digit: "0", "0s", "0.0s", "00ms" are zero, but
+# "0.5s", "15min", "500ms" are NOT (a leading-digits-only test would wrongly accept "0.5s"). A value
+# with no numeric part (e.g. an unresolved "${x}") is NOT zero.
 _is_zero_duration() {
   local v="$1"
   v="${v//\"/}"; v="${v//\'/}"          # strip quotes
   v="${v#"${v%%[![:space:]]*}"}"        # ltrim
   v="${v%"${v##*[![:space:]]}"}"        # rtrim
-  local num="${v%%[!0-9]*}"             # leading digit run
-  [[ -n "$num" ]] || return 1
-  [[ "$num" =~ ^0+$ ]]
+  local num="${v%%[a-zA-Z]*}"           # numeric part (before the unit); may contain '.'
+  [[ "$num" =~ ^[0-9.]+$ ]] || return 1 # digits/dot only — rejects "", "${x}", junk
+  [[ "$num" =~ [1-9] ]] && return 1     # any non-zero digit -> non-zero duration
+  [[ "$num" =~ [0-9] ]]                 # must contain at least one digit
 }
 
 # Resolve a reboot_timeout RHS to its effective default. A `${name}` reference is looked up as
@@ -83,22 +87,45 @@ scan_file() {
   return "$rc"
 }
 
-# Scan ROOT/modules and ROOT/hardware. Zero reboot_timeout keys is a vacuous PASS (nothing to
-# disable), but the self-test proves the FAIL path works so this is not a silent no-op.
+# Connectivity components whose reboot_timeout the offline invariant depends on. A module that
+# declares one of these AS A TOP-LEVEL COMPONENT (`^wifi:` / `^mqtt:`) MUST also wire an explicit
+# reboot_timeout — otherwise simply DELETING the key silently restores ESPHome's non-zero stock
+# default (15min) and the device reboots through an outage, a regression this gate would be blind to
+# if it only scanned the keys that happen to be present. Scoped per-file because modules are
+# introduced incrementally across the SDK branch chain: a file with no wifi:/mqtt: component (e.g.
+# the SDK-1 scaffold, which has no modules at all) has nothing to pin and is vacuously ok.
+CONNECTIVITY_COMPONENTS="wifi mqtt"
+
+# Scan ROOT/modules and ROOT/hardware. Enforces BOTH: (a) every reboot_timeout key resolves to a
+# zero default, and (b) every declared connectivity component wires a reboot_timeout key. Zero of
+# both across the tree is a vacuous PASS; the self-test proves each FAIL path so this is no silent
+# no-op.
 scan_root() {
-  local root="$1" rc=0 found=0 f
+  local root="$1" rc=0 found=0 f comp
   local -a dirs=("$root/modules" "$root/hardware")
   for d in "${dirs[@]}"; do
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
+      # (a) every reboot_timeout key present must resolve to 0s.
       if grep -qE '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$f" 2>/dev/null; then
         found=1
         scan_file "$f" || rc=1
       fi
+      # (b) a file declaring a connectivity component MUST wire a reboot_timeout — closes the
+      #     "delete the key -> inherit the 15min stock default -> gate goes blind" bypass.
+      for comp in $CONNECTIVITY_COMPONENTS; do
+        if grep -qE "^${comp}:([[:space:]]|$)" "$f" 2>/dev/null; then
+          found=1
+          if ! grep -qE '(^|[^A-Za-z0-9_])reboot_timeout[[:space:]]*:' "$f" 2>/dev/null; then
+            echo "check-offline-survival: FAIL — ${f}: declares '${comp}:' but wires no reboot_timeout — it would inherit ESPHome's non-zero stock default (15min)"
+            rc=1
+          fi
+        fi
+      done
     done < <(find "$d" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
   done
   if [ "$found" -eq 0 ]; then
-    echo "check-offline-survival: no reboot_timeout keys under ${root}/{modules,hardware} — vacuously ok"
+    echo "check-offline-survival: no reboot_timeout keys or connectivity components under ${root}/{modules,hardware} — vacuously ok"
   fi
   return "$rc"
 }
@@ -161,6 +188,31 @@ YAML
     echo "self-test: FAILED — a reboot_timeout with no in-repo default was NOT rejected"; rc=1
   else
     echo "self-test: PASS on bad tree (unresolvable default rejected) — ok"
+  fi
+
+  # BAD 4: a FRACTIONAL non-zero duration (0.5s). A leading-digits-only zero test would wrongly
+  # accept it (num=0); it must be rejected.
+  cat >"$tmp/modules/wifi.yaml" <<'YAML'
+wifi:
+  reboot_timeout: 0.5s
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — a fractional reboot_timeout: 0.5s was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad tree (fractional 0.5s rejected) — ok"
+  fi
+
+  # BAD 5: a connectivity component (`wifi:`) declared with NO reboot_timeout key — deleting the key
+  # would silently inherit ESPHome's 15min stock default. The presence assertion must catch it.
+  cat >"$tmp/modules/wifi.yaml" <<'YAML'
+wifi:
+  ssid: x
+  password: y
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — a wifi: component with no reboot_timeout was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad tree (connectivity component missing reboot_timeout rejected) — ok"
   fi
 
   rm -rf "$tmp"
