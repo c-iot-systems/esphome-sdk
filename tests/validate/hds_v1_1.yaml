@@ -14,6 +14,9 @@
 substitutions:
   device_name: hds-v1-1-testdev
   firmware_version: "0.0.0-test"
+  # Override the hardware default (ALWAYS_ON) so the two v1 fixtures exercise both CAN termination
+  # modes: this board sits mid-bus and must NOT terminate.
+  can_resistor_status: ALWAYS_OFF
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password

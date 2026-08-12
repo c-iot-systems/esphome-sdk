@@ -1,19 +1,26 @@
-# hds_v1_1 — concrete board definition + pin map, ported from legacy config/hardwares/ciot_v1_1.
+# hds_v1_1 — concrete board definition + pin map for the v1.1 board.
 #
-# Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino, from
-# ciot_v1_1/hardware_config.json) — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+# Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino) — never
+# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
 #
-# This board has no indicator LEDs, so it owns no OTA visual feedback (the legacy LED animation was
-# gated on #ifdef HARDWARE_FREEZER — a different board — and is not ported).
+# This board has no indicator LEDs, so it ships no OTA visual feedback (no module reaches into a
+# hardware id either way).
 #
-# Pin map (legacy ciot_v1_1):
-#   SW1          -> GPIO1    (hardware_config.json GPIO_SW1; on-board push button)
-#   CAN RESISTOR -> GPIO12   (core.json fixed "Power" slot; ALWAYS_ON termination)
+# Pin map:
+#   SW1          -> GPIO1    (on-board push button)
+#   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
 #
 # SW1 drives the STANDARD control buttons from controls.yaml (button_restart / button_factory) by
 # id — the hardware reaches into the module's public button ids, not the reverse. A device that
 # ships this board therefore imports controls.yaml. on_click is the explicit list form: three
 # separate click-length windows, each its own automation.
+#
+# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
+# segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
+# Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+substitutions:
+  can_resistor_status: ALWAYS_ON
+
 esp32:
   board: esp32dev
   variant: esp32
@@ -52,4 +59,4 @@ switch:
     pin: 12
     name: "CAN Resistor"
     internal: true
-    restore_mode: ALWAYS_ON
+    restore_mode: ${can_resistor_status}

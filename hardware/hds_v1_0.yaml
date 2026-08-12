@@ -1,16 +1,21 @@
-# hds_v1_0 — concrete board definition + pin map, ported from legacy config/hardwares/ciot_v1_0.
+# hds_v1_0 — concrete board definition + pin map for the v1.0 board.
 #
 # A hardware file owns the platform component (esp32:) and the board-specific I/O. Board, variant
-# and framework are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. The legacy
-# board came from ciot_v1_0/hardware_config.json (pico32 / esp32 / arduino).
+# and framework are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
 #
-# This board has no indicator LEDs, so it owns no OTA visual feedback (the legacy LED animation was
-# gated on #ifdef HARDWARE_FREEZER — a different board — and is not ported). The rule still holds:
-# if a hardware file had LEDs it would drive its own OTA feedback, and no module reaches into a
-# hardware id.
+# This board has no indicator LEDs, so it ships no OTA visual feedback. The rule still holds: a
+# hardware file WITH LEDs would drive its own OTA feedback by its own ids, and no module reaches
+# into a hardware id.
 #
-# Pin map (legacy ciot_v1_0 core.json fixed "Power" slot):
-#   CAN RESISTOR -> GPIO12   (CAN bus termination; ALWAYS_ON so the segment is always terminated)
+# Pin map:
+#   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
+#
+# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
+# segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
+# Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+substitutions:
+  can_resistor_status: ALWAYS_ON
+
 esp32:
   board: pico32
   variant: esp32
@@ -22,4 +27,4 @@ switch:
     pin: 12
     name: "CAN Resistor"
     internal: true
-    restore_mode: ALWAYS_ON
+    restore_mode: ${can_resistor_status}
