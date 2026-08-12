@@ -28,6 +28,7 @@
 #   | mqtt_port            | no       | 8883    | criotive_mqtt.yaml | port alone does NOT enable TLS |
 #   | mqtt_username        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
 #   | mqtt_password        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
+#   | mqtt_client_id       | no       | ${device_name} | criotive_mqtt.yaml | EMQX needs id==username; ${clientid}/ = cloudId |
 #   | mqtt_reboot_timeout  | no       | 0s      | criotive_mqtt.yaml | 0s = reboot DISABLED (offline) |
 #   | mqtt_discovery       | no       | true    | criotive_mqtt.yaml | Home Assistant discovery     |
 #   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |

@@ -71,6 +71,7 @@ the modules it imports.
 | `mqtt_port` | no | `8883` | conventional TLS port; the port alone does **not** enable TLS |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
+| `mqtt_client_id` | no | `${device_name}` | broker client id — **must equal `mqtt_username`** on EMQX; also the `${clientid}/` mountpoint the backend reads as `cloudId` — see below |
 | `mqtt_reboot_timeout` | no | `0s` | `0s` **disables** the MQTT reboot (offline survival) |
 | `mqtt_discovery` | no | `true` | Home Assistant discovery |
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
@@ -161,6 +162,31 @@ port, and a config that sets `8883` and no CA sends credentials in the clear. `c
 therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
 `certificate_authority`. The platform injects the broker's CA when generating the config, so staging
 and production can differ and the CA can rotate without an SDK release.
+
+### `mqtt_client_id` — a wrong client id silently drops telemetry
+
+The MQTT client id is **not** cosmetic and it is **not** the topic prefix. It defaults to
+`${device_name}` (so `client_id == topic_prefix == mqtt_username` for the common case) and is
+overridden per device with `mqtt_client_id` — typically a tenant-prefixed id such as
+`00000009d1:toystory1`.
+
+Two independent things break if it is wrong:
+
+- **EMQX refuses the connection.** The broker requires `client_id == username`; a mismatch is
+  rejected at CONNACK, so the device never connects.
+- **Telemetry is attributed to nothing and dropped.** The broker mounts `${clientid}/`, and the
+  backend reads that leading segment as the device's `cloudId`. A client id that does not match the
+  provisioned device means telemetry is published under an unknown mountpoint and **silently
+  discarded** — a far quieter failure than a refused connect.
+
+`client_id` and `topic_prefix` are therefore kept **independent**: some devices use a non-prefixed
+client id (e.g. `gelo-c82e18b52974`) while keeping the device-name topic prefix, so `mqtt_client_id`
+is its own override and is never derived from the prefix. `criotive_mqtt.yaml` also sets `client_id`
+**explicitly** rather than relying on ESPHome's default — left unset, ESPHome
+(`mqtt/mqtt_client.cpp:44`) sets it to `${device_name}-<mac>`, which would fail both checks above.
+`tests/validate/mqtt_client_id.yaml` proves an overridden id resolves into `mqtt: client_id:` while
+`topic_prefix` stays `${device_name}`; `tests/validate/mqtt_ota.yaml` proves the default path
+resolves `client_id` to the device name.
 
 ### MQTT log publishing is off by default
 
