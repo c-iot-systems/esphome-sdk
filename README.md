@@ -76,8 +76,6 @@ the modules it imports.
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
 | `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
-| `infinite_update_interval` | no | `4294967295ms` | *(`core.yaml`)* "never auto-publish" `update_interval` |
-| `infinite_int_value` | no | `4294967295` | *(`core.yaml`)* unbounded `max_value` / sentinel |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
@@ -104,17 +102,13 @@ ago for exactly this reason, and the SDK restores it.
   self-test proving it fails on a known-bad `reboot_timeout: 15min`) fails the build if any
   `reboot_timeout` default under `modules/` or `hardware/` resolves to a non-zero value.
 
-#### The `infinite_*` idioms
+#### "Never auto-publish": use `update_interval: never`
 
-`core.yaml` also restores legacy's two "infinite" sentinels as documented `lower_snake_case`
-substitutions (it declares them but does not itself consume them — they are for consuming device
-configs):
-
-- `infinite_update_interval` = `4294967295ms` (2³²−1 ms, the largest `uint32` duration ESPHome
-  accepts) — the **"never auto-publish"** `update_interval`: a periodic sensor set to it publishes
-  only on an explicit `publish_state()`, never on a timer.
-- `infinite_int_value` = `4294967295` (2³²−1) — an **unbounded `max_value`** / sentinel for numeric
-  fields.
+Legacy expressed a "never auto-publish" periodic sensor with an `INFINITE_UPDATE_INTERVAL`
+(`4294967295ms`) sentinel. The SDK does **not** carry that magic value: ESPHome's `update_interval:
+never` literal says the same thing far more clearly and is already used at every legacy use site
+(`firmware_version`, `sensor_boots`, `ota_status`, `google_location`). Future entities that should
+publish only on an explicit `publish_state()` must use `never`, not a numeric sentinel.
 
 ### Logging is off in production by default
 
