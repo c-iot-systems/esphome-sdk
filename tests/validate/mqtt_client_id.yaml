@@ -1,0 +1,51 @@
+# Positive validate fixture — the oracle for a SETTABLE, INDEPENDENT mqtt client id.
+#
+# It imports core + wifi + criotive_mqtt + ota at the REVISION UNDER TEST and sets `mqtt_client_id` to a
+# tenant-prefixed value that is DIFFERENT from `device_name`. `esphome config` output must show, under
+# `mqtt:`:
+#   - `client_id: 00000009d1:testdev`   (the override, NOT ESPHome's ${device_name}-<mac> default)
+#   - `topic_prefix: mqtt-clientid-testdev`   (still ${device_name} — client_id and prefix are independent)
+# This proves the two concerns stay decoupled: a broker that requires client_id == username (EMQX) and
+# reads `${clientid}/` as cloudId can be satisfied without disturbing the device-name topic prefix.
+# tests/validate/mqtt_ota.yaml covers the default path (client_id resolves to device_name).
+#
+# CI materializes __SDK_REF__ into the PR head SHA before running (see tests/validate/README.md).
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no
+# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: mqtt-clientid-testdev
+  # Tenant-prefixed id, intentionally != device_name, to prove client_id is an independent override.
+  mqtt_client_id: "00000009d1:testdev"
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: "00000009d1:testdev"
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  # ota.yaml is imported because criotive_mqtt's on_connect cancels ota's script_rollback (a
+  # deliberate cross-module id reference); it is incidental to what this fixture proves.
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+# Inline hardware stub — this fixture owns no hardware module, so it supplies the platform itself.
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
