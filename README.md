@@ -76,11 +76,30 @@ the modules it imports.
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
 | `ota_attempts` | no | `5` | safe-mode attempts |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
-| `logger_level` | no | `INFO` | |
+| `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
 device that forgets to override it. A missing required substitution must fail validation loudly, and
 the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+
+### Logging is off in production by default
+
+`logger_level` defaults to **`NONE`**: a device ships silent and its `logger:` emits nothing until a
+consumer raises the level **deliberately**. This mirrors the legacy firmware, whose ESPHome baseline
+was `LOGGER_LEVEL: "NONE"` and was only raised by opting into a named environment
+(`info` / `debug` / `verbose` / `veryverbose`) — never on by default. A chatty default is not free:
+it costs flash, CPU and (when a device also publishes logs) broker traffic on every unit that forgot
+to turn it down.
+
+To raise it, set the substitution per device to one of ESPHome's levels — `INFO`, `DEBUG`,
+`VERBOSE` or `VERY_VERBOSE`:
+
+```yaml
+substitutions:
+  logger_level: DEBUG   # opt in per device; production stays NONE
+```
+
+The knob is unchanged — only its default flipped from `INFO` back to `NONE`.
 
 ### Required substitutions fail loudly — the guard idiom
 
