@@ -11,9 +11,9 @@
 # Port 8883 does NOT enable TLS. Verified in ESPHome 2026.5.1: mqtt/__init__.py:439 calls
 # set_ca_certificate ONLY when `certificate_authority` is present; without it the transport is plain
 # TCP whatever the port, so credentials cross the network in the clear. criotive_mqtt.yaml therefore
-# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default (see
-# ADR-0022). The platform injects the broker's CA when generating the config, so staging and
-# production can differ and the CA can rotate without an SDK release.
+# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default. The
+# CA is supplied by the caller when generating the config, so staging and production can differ and
+# the CA can rotate without an SDK release.
 #
 # ── Required-substitution guard ───────────────────────────────────────────────────────────────
 # Merely referencing ${x} does not make it required: ESPHome's substitution pass is non-strict, so a
@@ -23,12 +23,11 @@
 # re-raised as a hard `esphome config` failure naming the variable. See core.yaml's header and the
 # README for the full rationale; tests/negative/ proves each omission fails.
 #
-# ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
-# The legacy on_boot MQTT lambda (NVS client-cert loading, the Azure/`were_certs_loaded` fallback
-# broker, the topic MAC suffix, the EMQX MQTT_BROKER_CLIENT_ID override) is gone. MQTT is the only
-# transport; there is no fallback broker path. The topic prefix and availability messages, which the
-# legacy set imperatively in that lambda, are now declared statically from ${device_name}. client_id
-# is left unset — ESPHome defaults it to the device name, which is the topic prefix.
+# ── MQTT is the only transport ────────────────────────────────────────────────────────
+# There is no fallback broker path and no device-twin / cloud-provider transport. The topic prefix
+# and the birth / last-will / shutdown availability messages are declared statically from
+# ${device_name}. client_id is left unset — ESPHome defaults it to the device name, which is the
+# topic prefix.
 
 substitutions:
   mqtt_port: "8883"

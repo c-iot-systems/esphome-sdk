@@ -6,8 +6,8 @@
 # that pulled in wifi/mqtt/ota would make every device pay for all of them.
 #
 # ── Substitution contract ────────────────────────────────────────────────────────────────────
-# Everything is a YAML substitution (never a C++ preprocessor define — the builder sidecar injects
-# no build flags). Names are lower_snake_case. "Required" is scoped to the OWNING module: importing
+# Everything is a YAML substitution (never a C++ preprocessor define — no build flags are
+# injected). Names are lower_snake_case. "Required" is scoped to the OWNING module: importing
 # a module makes its inputs required; core.yaml never makes another module's inputs globally
 # mandatory. No credential substitution has a default — a default password in a public repo is a
 # default password in every device that forgot to override it, so a missing credential must fail
@@ -42,9 +42,8 @@
 # fixture threads the same ref into the package `ref` and each module's `vars.sdk_ref`.
 #
 # ── Offline-survival invariant (product requirement — do NOT weaken) ──────────────────────────
-# A device MUST keep operating indefinitely while offline, WITHOUT rebooting. Field units (freezer
-# monitors, escape-room props) sit on flaky uplinks and must ride out an outage rather than reboot
-# through it. Therefore wifi_reboot_timeout AND mqtt_reboot_timeout DEFAULT TO 0s, which disables the
+# A device MUST keep operating indefinitely while offline, WITHOUT rebooting. Field units on
+# unreliable uplinks must ride out an outage rather than reboot through it. Therefore wifi_reboot_timeout AND mqtt_reboot_timeout DEFAULT TO 0s, which disables the
 # respective connectivity reboot OUTRIGHT — verified against ESPHome 2026.5.1 source, both components
 # guard App.reboot() with `reboot_timeout_ != 0` (wifi/wifi_component.cpp:867, mqtt/mqtt_client.cpp:418),
 # so set_reboot_timeout(0) makes the reboot branch unreachable. ESPHome's stock default is 15min for
@@ -80,11 +79,10 @@
 #     error), so `esphome config` exits non-zero with the offending expression — which names the
 #     variable — in the message. tests/negative/ proves each case.
 
-# logger_level defaults to NONE — the production posture. Legacy's ESPHome baseline is
-# LOGGER_LEVEL: "NONE" (config/frameworks/esphome/framework_config.json), raised only by opting into
-# a named environment (config/environments.json: info/debug/verbose/veryverbose). Parity means the
-# default ships silent and a consumer raises it DELIBERATELY per device — logger_level: INFO (or
-# DEBUG/VERBOSE/VERY_VERBOSE) — never the SDK shipping every device chatty by default.
+# logger_level defaults to NONE — the production posture: the default ships silent and a consumer
+# raises it DELIBERATELY per device — logger_level: INFO (or DEBUG/VERBOSE/VERY_VERBOSE) — never the
+# SDK shipping every device chatty by default. A chatty default is not free: it costs flash, CPU and
+# (when a device also publishes logs) broker traffic on every unit that forgot to turn it down.
 substitutions:
   logger_level: NONE
 

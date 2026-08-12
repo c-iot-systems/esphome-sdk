@@ -3,17 +3,15 @@
 # Owns: the shutdown / restart / safe-mode / factory-reset buttons. Opt-in, no substitution inputs,
 # imports nothing.
 #
-# ── my_button is NOT ported (deprecated — ADR-0021) ───────────────────────────────────────────
-# The legacy config exposed these controls through the custom `my_button` component: each my_button
-# waited 500 ms — long enough for the button-press state to publish over MQTT — then pressed an
-# internal, standard action button. my_button is deprecated, so the SAME behaviour is rebuilt from
-# STANDARD ESPHome button platforms only: a `template` button is the user-facing entry point (it owns
-# the 500 ms publish delay in its `on_press`), and it presses an internal button on the standard
+# ── Controls rebuilt from standard ESPHome button platforms ───────────────────────────────────────────
+# These controls are built from STANDARD ESPHome button platforms only — no custom component. Each
+# user-facing control is a `template` button whose `on_press` waits 500 ms — long enough for the
+# button-press state to publish over MQTT — then presses an internal button on the standard
 # `shutdown` / `restart` / `safe_mode` / `factory_reset` platform that actually performs the action.
-# No custom component is involved. The internal action buttons are `internal: true`, so only the four
-# template buttons reach the exposed API / MQTT surface — exactly the four controls the legacy set.
+# The internal action buttons are `internal: true`, so only the four template buttons reach the
+# exposed API / MQTT surface — exactly the four device-lifecycle controls.
 #
-# The legacy "Location Request" my_button is NOT here: it drives the google_location text sensor, so
+# The "Location Request" control is NOT here: it drives the google_location text sensor, so
 # it belongs with that component in location.yaml. Keeping it out of controls.yaml is what lets a
 # device import controls without also importing location.
 

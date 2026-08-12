@@ -2,7 +2,7 @@
 
 Shared ESPHome configuration for criotive firmware, consumed through ESPHome's native
 [`packages:`](https://esphome.io/components/packages.html) mechanism. The AI firmware-generation
-path and the builder sidecar assemble a device's `main.yaml` by importing modules from this
+path and the build service assemble a device's `main.yaml` by importing modules from this
 repository at a pinned tag.
 
 ```yaml
@@ -49,7 +49,7 @@ Supported hardware:
 
 `core.yaml` is the one documented place answering *"what must every firmware supply?"*. Every
 parameter arrives as a YAML `substitutions:` value — **nothing is a C++ preprocessor define**, because
-the builder sidecar injects no build flags. Substitution names are `lower_snake_case`.
+no build flags are injected. Substitution names are `lower_snake_case`.
 
 **"Required" is scoped to the module that uses it.** Only `device_name`, `firmware_version` and
 `sdk_ref` are required by `core.yaml` and therefore by every device. `wifi_*` is required by
@@ -85,10 +85,9 @@ the PR-time `esphome config` check plus the negative-fixture harness prove it do
 
 ### A device never reboots through an outage — offline survival is an invariant
 
-**A device MUST continue operating indefinitely while offline, without rebooting.** Field units —
-freezer monitors, escape-room props — sit on flaky uplinks and must ride out an outage rather than
-power-cycle through it. This is not a preference; legacy pinned both reboot timeouts to `0s` years
-ago for exactly this reason, and the SDK restores it.
+**A device MUST continue operating indefinitely while offline, without rebooting.** Field units on
+unreliable uplinks must ride out an outage rather than power-cycle through it. This is not a
+preference; both reboot timeouts default to `0s` for exactly this reason.
 
 - `wifi_reboot_timeout` and `mqtt_reboot_timeout` both default to **`0s`**, which **disables** the
   respective connectivity reboot outright. Verified against ESPHome 2026.5.1 source — both components
@@ -201,7 +200,7 @@ one arbitrary, stale log line to every new subscriber — never what a log consu
 
 `ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
 broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
-known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+known-good build. Audited against the offline-survival invariant: ESP-IDF's
 `esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
 unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
 a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
@@ -282,7 +281,7 @@ esphome-sdk/
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.
 
-ESPHome is pinned to **2026.5.1** in CI, matching what the builder sidecar installs.
+ESPHome is pinned to **2026.5.1** in CI.
 
 ## Modules
 
@@ -322,8 +321,8 @@ CI compiles the C++ at least once per release.
 - **`tca8418.yaml` — TCA8418 I2C GPIO expander.** `TCA8418Component` extends
   `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers `TCA8418GPIOPin` as a real
   `GPIOPin`, adding 18 pins (ROW0–ROW7, COL0–COL9) over I2C that any component can use as a pin
-  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, not an
-  escape-room prop, and unrelated to ESPHome's native `matrix_keypad`/`key_collector` (those *scan*
+  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, not a
+  single-application peripheral, and unrelated to ESPHome's native `matrix_keypad`/`key_collector` (those *scan*
   a keypad matrix; this *provides* pins). **Import it when** a board runs short on native GPIO. The
   component AUTO_LOADs `gpio_expander` and DEPENDS on `i2c`, so the device must also declare an
   `i2c:` bus. Instantiate `tca8418:` with the board's address, then reference a pin as
@@ -335,13 +334,13 @@ CI compiles the C++ at least once per release.
   `uart:` bus **with a tx pin** (the Sprite receives commands on tx). Instantiate `medeawiz:` on
   that bus and use its actions (`medeawiz.play_file`, `medeawiz.seek`, …) and triggers
   (`on_file`, `on_end_of_file`).
-- **`phone.yaml` — matrix-keypad "phone" prop driver.** Scans a keypad matrix (or individual column
+- **`phone.yaml` — matrix-keypad "phone" input driver.** Scans a keypad matrix (or individual column
   buttons when no rows are given), debounces presses, tracks on/off-hook from an optional
   `binary_sensor`, and matches typed sequences against configured passwords, firing right/wrong
   triggers. No ESPHome-native component does this. **Import it when** the device drives a keypad
-  "phone" prop. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
+  "phone" peripheral. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
   they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
-  rows × columns), and any hook sensor / passwords / automations the prop needs.
+  rows × columns), and any hook sensor / passwords / automations the peripheral needs.
 
 ### Hardware modules
 

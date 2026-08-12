@@ -10,9 +10,9 @@
 # `TCA8418Component` extends `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers
 # `TCA8418GPIOPin` as a real `GPIOPin`, so its 18 pins (ROW0-ROW7, COL0-COL9) can be used as a pin
 # source by ANY component — a `binary_sensor: platform: gpio` input, a `switch: platform: gpio`
-# output, and so on. It is a GENERAL capability for any criotive board short on native GPIO, not an
-# escape-room prop, and is unrelated to ESPHome's native matrix_keypad/key_collector (those scan a
-# keypad matrix; this provides pins). The component AUTO_LOADs gpio_expander and DEPENDS on i2c, so
+# output, and so on. It is a GENERAL capability for any criotive board short on native GPIO, not a
+# single-application peripheral, and is unrelated to ESPHome's native matrix_keypad/key_collector
+# (those scan a keypad matrix; this provides pins). The component AUTO_LOADs gpio_expander and DEPENDS on i2c, so
 # a consumer must also declare an `i2c:` bus.
 #
 # ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────

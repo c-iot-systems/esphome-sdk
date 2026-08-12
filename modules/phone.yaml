@@ -1,9 +1,9 @@
-# phone.yaml — matrix-keypad "phone" prop driver (optional hardware module).
+# phone.yaml — matrix-keypad "phone" input driver (optional hardware module).
 #
 # Declares ONLY the `phone` external component. A device imports this module to make the driver
 # available; it then instantiates `phone:` with the concrete row/column GPIO pins its board wires,
 # the key layout, and any hook sensor, passwords and on_key_press / on_hook / on_password_*
-# automations the prop needs. All of that is device-specific, so no `phone:` instance is declared in
+# automations the peripheral needs. All of that is device-specific, so no `phone:` instance is declared in
 # this shared module.
 #
 # The driver scans a keypad matrix (or individual column buttons when no rows are given), debounces
