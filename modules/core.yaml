@@ -22,17 +22,19 @@
 #   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
 #   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
 #   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
-#   | wifi_reboot_timeout  | no       | 15min   | wifi.yaml          |                              |
+#   | wifi_reboot_timeout  | no       | 0s      | wifi.yaml          | 0s = reboot DISABLED (offline) |
 #   | mqtt_broker          | yes      | —       | criotive_mqtt.yaml |                              |
 #   | mqtt_ca_certificate  | yes      | —       | criotive_mqtt.yaml | TLS trust anchor; no default |
 #   | mqtt_port            | no       | 8883    | criotive_mqtt.yaml | port alone does NOT enable TLS |
 #   | mqtt_username        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
 #   | mqtt_password        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
-#   | mqtt_reboot_timeout  | no       | 15min   | criotive_mqtt.yaml |                              |
+#   | mqtt_reboot_timeout  | no       | 0s      | criotive_mqtt.yaml | 0s = reboot DISABLED (offline) |
 #   | mqtt_discovery       | no       | true    | criotive_mqtt.yaml | Home Assistant discovery     |
 #   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |
-#   | ota_attempts         | no       | 5       | ota.yaml           | safe-mode attempts           |
+#   | ota_attempts         | no       | 50      | ota.yaml           | safe-mode attempts (legacy)  |
 #   | ota_http_server      | yes      | —       | ota.yaml           | HTTPS OTA download host       |
+#   | infinite_update_interval | no   | 4294967295ms | core.yaml     | "never auto-publish" idiom   |
+#   | infinite_int_value       | no   | 4294967295   | core.yaml     | unbounded max_value idiom    |
 #
 # sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
 # propagate a package `ref` into a module's own `external_components:` block. core.yaml and wifi.yaml
@@ -41,9 +43,30 @@
 # required, not merely conventional. check-sdk-ref.sh additionally enforces that every validate
 # fixture threads the same ref into the package `ref` and each module's `vars.sdk_ref`.
 #
+# ── Offline-survival invariant (product requirement — do NOT weaken) ──────────────────────────
+# A device MUST keep operating indefinitely while offline, WITHOUT rebooting. Field units (freezer
+# monitors, escape-room props) sit on flaky uplinks and must ride out an outage rather than reboot
+# through it. Therefore wifi_reboot_timeout AND mqtt_reboot_timeout DEFAULT TO 0s, which disables the
+# respective connectivity reboot OUTRIGHT — verified against ESPHome 2026.5.1 source, both components
+# guard App.reboot() with `reboot_timeout_ != 0` (wifi/wifi_component.cpp:867, mqtt/mqtt_client.cpp:418),
+# so set_reboot_timeout(0) makes the reboot branch unreachable. ESPHome's stock default is 15min for
+# both; the SDK restores legacy's 0s. No module may (re)introduce a connectivity-driven reboot — this
+# includes ota.yaml's rollback watchdog, which is gated on ESP_OTA_IMG_PENDING_VERIFY so a confirmed,
+# long-offline image is never rolled back (see ota.yaml). scripts/check-offline-survival.sh (wired
+# into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
+# non-zero, so this cannot silently regress again.
+#
+# infinite_update_interval / infinite_int_value restore legacy's INFINITE_* idioms as documented
+# lower_snake_case substitutions: infinite_update_interval (4294967295ms == 2^32-1 ms, the max uint32
+# duration ESPHome accepts) is the "never auto-publish" update_interval — a periodic sensor set to it
+# publishes ONLY on an explicit publish_state(); infinite_int_value (4294967295 == 2^32-1) is the
+# unbounded max_value / sentinel for numeric fields. core.yaml declares them but does not itself
+# consume them; they are provided for consuming device configs (see the README).
+#
 # This module OWNS: esphome:, device identity, the firmware_version text sensor, the boot counter,
-# preferences, logger and sntp time. Optional inputs it owns (logger_level) get a default below;
-# required inputs it owns (device_name, firmware_version) are referenced with NO default.
+# preferences, logger and sntp time. Optional inputs it owns (logger_level, infinite_update_interval,
+# infinite_int_value) get a default below; required inputs it owns (device_name, firmware_version)
+# are referenced with NO default.
 #
 # ── How "required" is enforced ───────────────────────────────────────────────────────────────
 # ESPHome 2026.5.1 does NOT hard-fail on an undefined substitution: the substitution pass runs
@@ -68,6 +91,13 @@
 # DEBUG/VERBOSE/VERY_VERBOSE) — never the SDK shipping every device chatty by default.
 substitutions:
   logger_level: NONE
+  # Legacy INFINITE_* idioms restored as documented substitutions (see the header + README). Not
+  # consumed by core.yaml itself — provided for consuming device configs.
+  #   infinite_update_interval: 2^32-1 ms — an update_interval so large a periodic sensor NEVER
+  #     auto-publishes; it publishes only on an explicit publish_state() ("never auto-publish").
+  #   infinite_int_value: 2^32-1 — an unbounded max_value / sentinel for numeric fields.
+  infinite_update_interval: 4294967295ms
+  infinite_int_value: "4294967295"
 
 esphome:
   name: ${device_name}

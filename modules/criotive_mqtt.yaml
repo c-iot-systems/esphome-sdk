@@ -32,7 +32,18 @@
 
 substitutions:
   mqtt_port: "8883"
-  mqtt_reboot_timeout: 15min
+  # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the MQTT reboot
+  # outright, so a device rides out a broker/uplink outage instead of power-cycling every timeout.
+  # Proven, not assumed — ESPHome 2026.5.1 mqtt/mqtt_client.cpp:418-421:
+  #     if (millis() - this->last_connected_ > this->reboot_timeout_ && this->reboot_timeout_ != 0) {
+  #       ... App.reboot();
+  #     }
+  # set_reboot_timeout(0) leaves reboot_timeout_ == 0, so the `!= 0` guard is false and App.reboot()
+  # is unreachable. Legacy pinned MQTT_REBOOT_TIMEOUT to 0s for exactly this reason; ESPHome's stock
+  # default is 15min (mqtt/__init__.py:285), which the SDK port silently adopted and this restores.
+  # Overridable per device, but the DEFAULT must stay 0s — scripts/check-offline-survival.sh fails
+  # the build if any reboot_timeout default under modules/ or hardware/ is non-zero.
+  mqtt_reboot_timeout: 0s
   mqtt_discovery: "true"
 
 mqtt:
