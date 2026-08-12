@@ -58,7 +58,9 @@ jobs:
             sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
           done
           # Guard: no placeholder survives, and every resolved ref is exactly the tag being released.
-          if grep -RIl '__SDK_REF__' tests/validate/ ; then
+          # Scan only the YAML fixtures — tests/validate/README.md documents the literal
+          # __SDK_REF__ placeholder and must not be treated as a fixture.
+          if grep -l '__SDK_REF__' "${files[@]}" ; then
             echo "::error::A fixture still contains __SDK_REF__ after materialization"
             exit 1
           fi

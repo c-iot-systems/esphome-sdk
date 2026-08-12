@@ -23,12 +23,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Strip surrounding quotes and inline trailing comments from a captured YAML scalar.
+# Strip surrounding quotes, inline comments and flow-mapping punctuation from a captured YAML
+# scalar. A trailing flow close-brace is dropped only when it is NOT part of a ${...} expansion,
+# so `${sdk_ref}` survives intact while `v0.1.0}` (from `{..., ref: v0.1.0}`) becomes `v0.1.0`.
 _clean_value() {
   local v="$1"
   v="${v%%#*}"                       # drop trailing comment
   v="${v#"${v%%[![:space:]]*}"}"     # ltrim
   v="${v%"${v##*[![:space:]]}"}"     # rtrim
+  v="${v%,}"                         # drop a flow-mapping trailing comma
+  if [[ "$v" != *'{'* ]]; then v="${v%\}}"; fi   # drop a flow close-brace, but keep ${...}
   v="${v#\"}"; v="${v%\"}"           # strip double quotes
   v="${v#\'}"; v="${v%\'}"           # strip single quotes
   printf '%s' "$v"
@@ -58,7 +62,12 @@ check_validate_file() {
   done <"$file"
 
   if [[ "${#sdk_refs[@]}" -eq 0 ]]; then
-    return 0    # not a package-consuming config; nothing to bind
+    if [[ "$have_ref" -eq 1 ]]; then
+      # A package ref with no vars.sdk_ref means the ref is never threaded to any module's
+      # external_components — the component would silently follow the default branch.
+      echo "$file: declares a package ref but no vars.sdk_ref to thread it to modules"; return 1
+    fi
+    return 0    # not an SDK-consuming config; nothing to bind
   fi
   if [[ "$have_ref" -eq 0 ]]; then
     echo "$file: has vars.sdk_ref but no package ref: to bind it to"; return 1
@@ -71,17 +80,20 @@ check_validate_file() {
   return "$rc"
 }
 
-# Check B: every ref: in a module/hardware file must be exactly ${sdk_ref}.
+# Check B: every ref: in a module/hardware file must be exactly ${sdk_ref}. Handles both block
+# style ( "  ref: ${sdk_ref}" ) and flow style ( "source: {type: git, ..., ref: v0.1.0}" ). The
+# `(^|[^A-Za-z0-9_])` boundary keeps `sdk_ref:` (a substitution name) from matching the `ref:` key.
 check_module_file() {
-  local file="$1" rc=0 line val
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^[[:space:]]*ref:[[:space:]]*(.+)$ ]]; then
-      val="$(_clean_value "${BASH_REMATCH[1]}")"
-      if [[ "$val" != '${sdk_ref}' ]]; then
-        echo "$file: hard-coded external_components ref '$val' — must be \${sdk_ref}"; rc=1
-      fi
+  local file="$1" rc=0 raw val
+  local ok='__SDKREF_OK__'   # brace-free stand-in so flow-map close braces do not confuse parsing
+  while IFS= read -r raw; do
+    val="$(_clean_value "$raw")"
+    if [[ "$val" != "$ok" ]]; then
+      echo "$file: hard-coded external_components ref '$val' — must be \${sdk_ref}"; rc=1
     fi
-  done <"$file"
+  done < <(sed 's/\${sdk_ref}/'"$ok"'/g' "$file" \
+             | grep -oE '(^|[^A-Za-z0-9_])ref:[[:space:]]*[^,[:space:]]+' \
+             | sed -E 's/.*ref:[[:space:]]*//')
   return "$rc"
 }
 
@@ -159,7 +171,7 @@ packages:
         vars: {sdk_ref: __SDK_REF__}
 YAML
 
-  # BAD 2: a module hard-codes a component ref.
+  # BAD 2: a module hard-codes a component ref (block style).
   cat >"$tmp/modules/location.yaml" <<'YAML'
 external_components:
   - source:
@@ -171,7 +183,40 @@ YAML
   if scan_root "$tmp" >/dev/null 2>&1; then
     echo "self-test: FAILED — hard-coded module ref was NOT rejected"; rc=1
   else
-    echo "self-test: PASS on bad fixture (hard-coded module ref rejected) — ok"
+    echo "self-test: PASS on bad fixture (hard-coded block ref rejected) — ok"
+  fi
+
+  # BAD 3: a module hard-codes a component ref in FLOW style on one line.
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source: {type: git, url: https://github.com/c-iot-systems/esphome-sdk, ref: v0.1.0}
+    components: [google_location]
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — hard-coded inline flow ref was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (hard-coded inline flow ref rejected) — ok"
+  fi
+  # restore a good module for the next case
+  cat >"$tmp/modules/location.yaml" <<'YAML'
+external_components:
+  - source: {type: git, url: https://github.com/c-iot-systems/esphome-sdk, ref: ${sdk_ref}}
+    components: [google_location]
+YAML
+
+  # BAD 4: a validate fixture declares a package ref but no vars.sdk_ref to thread it.
+  cat >"$tmp/tests/validate/good.yaml" <<'YAML'
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — package ref without vars.sdk_ref was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (package ref without vars.sdk_ref rejected) — ok"
   fi
 
   rm -rf "$tmp"

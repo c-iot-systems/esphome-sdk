@@ -60,20 +60,29 @@ read -r -d '' AWK_PROG <<'AWK' || true
 
   if (is_blank || is_comment) { next }
 
-  # on_* key with nothing meaningful after the colon -> block form, inspect its child next.
-  if (trimmed ~ /^on_[a-z0-9_]+:[ \t]*(#.*)?$/) {
-    key_indent = indent
-    key_line   = NR
-    key_name   = trimmed; sub(/:.*$/, "", key_name)
-    pending    = 1
-    next
-  }
+  # on_* key: classify the value that follows the colon.
+  if (match(trimmed, /^on_[a-z0-9_]+:/)) {
+    key_name = substr(trimmed, 1, RLENGTH - 1)   # drop the trailing colon
+    rest     = substr(trimmed, RLENGTH + 1)
+    sub(/^[ \t]+/, "", rest)                     # trim leading whitespace
+    sub(/^[&!][^ \t]+[ \t]*/, "", rest)          # strip a leading YAML anchor (&x) or tag (!x)
+    sub(/[ \t]*#.*$/, "", rest)                  # strip a trailing comment
+    sub(/[ \t]+$/, "", rest)
 
-  # on_* key with an inline flow mapping ( on_x: { ... } ) -> mapping form, flag immediately.
-  if (trimmed ~ /^on_[a-z0-9_]+:[ \t]*\{/) {
-    kn = trimmed; sub(/:.*$/, "", kn)
-    printf "%s:%d: %s uses an inline mapping form; automations must use explicit list syntax\n", FILENAME, NR, kn
-    fail = 1
+    if (rest == "") {
+      # nothing (or only an anchor/tag) after the key -> block form, inspect its child next.
+      key_indent = indent
+      key_line   = NR
+      pending    = 1
+      next
+    }
+    if (rest ~ /^\{/) {
+      # inline flow mapping ( on_x: { ... } ) -> mapping form, flag immediately.
+      printf "%s:%d: %s uses an inline mapping form; automations must use explicit list syntax\n", FILENAME, NR, key_name
+      fail = 1
+      next
+    }
+    # rest starts with '[' (flow sequence) or another scalar -> not a mapping we can flag.
     next
   }
 }
@@ -136,6 +145,11 @@ ota:
   on_error:
     - then:
         - logger.log: e
+button:
+  - platform: template
+    on_press: &shared_press   # anchored sequence is still the list form
+      - then:
+          - logger.log: anchored
 YAML
   cat >"$tmp/hardware/good_flow.yaml" <<'YAML'
 sensor:
@@ -179,6 +193,21 @@ YAML
     echo "self-test: PASS on bad fixture (inline mapping form rejected) — ok"
   fi
   rm -f "$tmp/modules/bad_flow.yaml"
+
+  # BAD fixture: anchored mapping form ( on_x: &anchor then a mapping child ).
+  cat >"$tmp/modules/bad_anchor.yaml" <<'YAML'
+component:
+  on_press: &handler
+    priority: 600
+    then:
+      - logger.log: nope
+YAML
+  if scan_root "$tmp" >/dev/null 2>&1; then
+    echo "self-test: FAILED — anchored mapping form was NOT rejected"; rc=1
+  else
+    echo "self-test: PASS on bad fixture (anchored mapping form rejected) — ok"
+  fi
+  rm -f "$tmp/modules/bad_anchor.yaml"
 
   rm -rf "$tmp"
   return "$rc"
