@@ -35,6 +35,11 @@ jobs:
           bash scripts/check-sdk-ref.sh --self-test
           bash scripts/check-sdk-ref.sh
 
+      - name: Offline-survival gate (reboot_timeout defaults must be 0s)
+        run: |
+          bash scripts/check-offline-survival.sh --self-test
+          bash scripts/check-offline-survival.sh
+
       - name: Materialize the revision under test into validate fixtures
         run: |
           set -euo pipefail
