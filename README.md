@@ -311,12 +311,37 @@ restructuring the others.
 
 ### Optional hardware modules
 
-A device imports one of these only if it has that hardware.
+A device imports one of these **only if it has that hardware** — they are drivers, not business
+logic, and are not replaceable by standard switches. Each module declares **only** its own
+`external_components` source (pinned to `${sdk_ref}`); it does **not** instantiate the component,
+because the instance is inherently device-specific (I2C address, UART bus, which pins, key layout).
+A device imports the module to make the driver available and then declares the instance in its own
+private config. Each has a validate fixture under `tests/validate/` that instantiates it, so release
+CI compiles the C++ at least once per release.
 
-- `tca8418.yaml` — I2C GPIO expander (`TCA8418GPIOPin`); a general capability, usable as a pin
-  source by any component.
-- `medeawiz.yaml` — serial video-player driver.
-- `phone.yaml` — prop driver.
+- **`tca8418.yaml` — TCA8418 I2C GPIO expander.** `TCA8418Component` extends
+  `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers `TCA8418GPIOPin` as a real
+  `GPIOPin`, adding 18 pins (ROW0–ROW7, COL0–COL9) over I2C that any component can use as a pin
+  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, not an
+  escape-room prop, and unrelated to ESPHome's native `matrix_keypad`/`key_collector` (those *scan*
+  a keypad matrix; this *provides* pins). **Import it when** a board runs short on native GPIO. The
+  component AUTO_LOADs `gpio_expander` and DEPENDS on `i2c`, so the device must also declare an
+  `i2c:` bus. Instantiate `tca8418:` with the board's address, then reference a pin as
+  `pin: {tca8418: <id>, number: 0-17, mode: {...}}`.
+- **`medeawiz.yaml` — MedeaWiz Sprite 4K serial video-player driver.** Controls a Sprite (DV-S4)
+  over its TTL serial port with a bespoke single-byte protocol (play file N, seek, volume,
+  request position/duration, end-of-file feedback); no ESPHome-native equivalent exists. **Import
+  it when** the device drives a MedeaWiz Sprite. DEPENDS on `uart`, so the device must declare a
+  `uart:` bus **with a tx pin** (the Sprite receives commands on tx). Instantiate `medeawiz:` on
+  that bus and use its actions (`medeawiz.play_file`, `medeawiz.seek`, …) and triggers
+  (`on_file`, `on_end_of_file`).
+- **`phone.yaml` — matrix-keypad "phone" prop driver.** Scans a keypad matrix (or individual column
+  buttons when no rows are given), debounces presses, tracks on/off-hook from an optional
+  `binary_sensor`, and matches typed sequences against configured passwords, firing right/wrong
+  triggers. No ESPHome-native component does this. **Import it when** the device drives a keypad
+  "phone" prop. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
+  they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
+  rows × columns), and any hook sensor / passwords / automations the prop needs.
 
 ### Hardware modules
 

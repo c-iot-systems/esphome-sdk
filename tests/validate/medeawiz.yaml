@@ -1,0 +1,44 @@
+# Positive validate fixture for the medeawiz optional-hardware module.
+#
+# Imports ONLY modules/medeawiz.yaml at the REVISION UNDER TEST (CI materializes __SDK_REF__ — see
+# tests/validate/README.md), supplies an inline esphome/esp32 stub and a uart bus with a tx pin (the
+# Sprite receives commands on tx; medeawiz DEPENDS on uart and its FINAL_VALIDATE_SCHEMA requires a
+# tx pin), and instantiates `medeawiz:`. Release CI compiles this fixture for real, so the driver's
+# C++ is built at least once per release.
+#
+# The fixture is deliberately self-contained (inline esphome/esp32 rather than importing core.yaml):
+# this optional driver needs no network, sntp or credentials, so pulling in core+wifi just to satisfy
+# core's sntp/network requirement would couple the fixture to modules it does not exercise. It still
+# exercises the module's own external_components git source pinned to ${sdk_ref} and the packages/vars
+# threading — check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
+# The repo is public, so no value here is a real credential.
+esphome:
+  name: medeawiz-testdev
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+# The Sprite is driven over TTL serial; 9600 8N1 is the Sprite's factory default.
+uart:
+  - id: sprite_uart
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+    baud_rate: 9600
+
+# Instantiate the driver on that bus. Real devices set the address/feedback/automations they need;
+# this stub is what forces the component to compile.
+medeawiz:
+  - id: video_player
+    uart_id: sprite_uart
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/medeawiz.yaml
+        vars: {sdk_ref: __SDK_REF__}
