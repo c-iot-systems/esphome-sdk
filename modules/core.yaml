@@ -33,8 +33,6 @@
 #   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |
 #   | ota_attempts         | no       | 50      | ota.yaml           | safe-mode attempts (legacy)  |
 #   | ota_http_server      | yes      | —       | ota.yaml           | HTTPS OTA download host       |
-#   | infinite_update_interval | no   | 4294967295ms | core.yaml     | "never auto-publish" idiom   |
-#   | infinite_int_value       | no   | 4294967295   | core.yaml     | unbounded max_value idiom    |
 #
 # sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
 # propagate a package `ref` into a module's own `external_components:` block. core.yaml and wifi.yaml
@@ -56,17 +54,15 @@
 # into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
 # non-zero, so this cannot silently regress again.
 #
-# infinite_update_interval / infinite_int_value restore legacy's INFINITE_* idioms as documented
-# lower_snake_case substitutions: infinite_update_interval (4294967295ms == 2^32-1 ms, the max uint32
-# duration ESPHome accepts) is the "never auto-publish" update_interval — a periodic sensor set to it
-# publishes ONLY on an explicit publish_state(); infinite_int_value (4294967295 == 2^32-1) is the
-# unbounded max_value / sentinel for numeric fields. core.yaml declares them but does not itself
-# consume them; they are provided for consuming device configs (see the README).
+# Legacy's INFINITE_UPDATE_INTERVAL / INFINITE_INT_VALUE are deliberately NOT reintroduced as
+# substitutions: the SDK already expresses "never auto-publish" with ESPHome's `update_interval:
+# never` literal at every legacy use site (firmware_version, sensor_boots, ota_status,
+# google_location), which is strictly clearer than a magic 4294967295ms; and no `number:` entity
+# exists that would consume an unbounded max_value sentinel. Future entities should use `never`.
 #
 # This module OWNS: esphome:, device identity, the firmware_version text sensor, the boot counter,
-# preferences, logger and sntp time. Optional inputs it owns (logger_level, infinite_update_interval,
-# infinite_int_value) get a default below; required inputs it owns (device_name, firmware_version)
-# are referenced with NO default.
+# preferences, logger and sntp time. Optional inputs it owns (logger_level) get a default below;
+# required inputs it owns (device_name, firmware_version) are referenced with NO default.
 #
 # ── How "required" is enforced ───────────────────────────────────────────────────────────────
 # ESPHome 2026.5.1 does NOT hard-fail on an undefined substitution: the substitution pass runs
@@ -91,13 +87,6 @@
 # DEBUG/VERBOSE/VERY_VERBOSE) — never the SDK shipping every device chatty by default.
 substitutions:
   logger_level: NONE
-  # Legacy INFINITE_* idioms restored as documented substitutions (see the header + README). Not
-  # consumed by core.yaml itself — provided for consuming device configs.
-  #   infinite_update_interval: 2^32-1 ms — an update_interval so large a periodic sensor NEVER
-  #     auto-publishes; it publishes only on an explicit publish_state() ("never auto-publish").
-  #   infinite_int_value: 2^32-1 — an unbounded max_value / sentinel for numeric fields.
-  infinite_update_interval: 4294967295ms
-  infinite_int_value: "4294967295"
 
 esphome:
   name: ${device_name}
