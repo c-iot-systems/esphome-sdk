@@ -169,6 +169,18 @@ is a rolling stream: each line overwrites the last, so a retained log topic make
 one arbitrary, stale log line to every new subscriber — never what a log consumer wants.
 `tests/validate/mqtt_log_optin.yaml` exercises this opt-in path.
 
+### OTA rollback watchdog is offline-safe
+
+`ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
+broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
+known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+`esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
+unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
+a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
+The watchdog is therefore gated on `ESP_OTA_IMG_PENDING_VERIFY` (ESP-IDF's own idiom in
+`esp_ota_begin`): only a freshly-flashed, not-yet-verified image can roll back; a confirmed,
+long-offline image is never touched. OTA safety is preserved and offline survival is guaranteed.
+
 ## `${sdk_ref}` — pinning the components with the YAML
 
 ESPHome treats `packages:` and `external_components:` as **independent** git sources: a module
