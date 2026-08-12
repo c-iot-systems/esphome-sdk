@@ -65,23 +65,57 @@ the modules it imports.
 | `wifi_ssid` | **yes** | — | *(`wifi.yaml`)* |
 | `wifi_password` | **yes** | — | *(`wifi.yaml`)* — **no default, ever** |
 | `wifi_ap_password` | **yes** | — | fallback AP; **no default, ever** |
-| `wifi_reboot_timeout` | no | `15min` | *(`wifi.yaml`)* |
+| `wifi_reboot_timeout` | no | `0s` | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
 | `mqtt_broker` | **yes** | — | *(`criotive_mqtt.yaml`)* |
 | `mqtt_ca_certificate` | **yes** | — | **the TLS trust anchor — see below** |
 | `mqtt_port` | no | `8883` | conventional TLS port; the port alone does **not** enable TLS |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
-| `mqtt_reboot_timeout` | no | `15min` | |
+| `mqtt_reboot_timeout` | no | `0s` | `0s` **disables** the MQTT reboot (offline survival) |
 | `mqtt_discovery` | no | `true` | Home Assistant discovery |
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
-| `ota_attempts` | no | `5` | safe-mode attempts |
+| `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
 | `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
+| `infinite_update_interval` | no | `4294967295ms` | *(`core.yaml`)* "never auto-publish" `update_interval` |
+| `infinite_int_value` | no | `4294967295` | *(`core.yaml`)* unbounded `max_value` / sentinel |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
 device that forgets to override it. A missing required substitution must fail validation loudly, and
 the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+
+### A device never reboots through an outage — offline survival is an invariant
+
+**A device MUST continue operating indefinitely while offline, without rebooting.** Field units —
+freezer monitors, escape-room props — sit on flaky uplinks and must ride out an outage rather than
+power-cycle through it. This is not a preference; legacy pinned both reboot timeouts to `0s` years
+ago for exactly this reason, and the SDK restores it.
+
+- `wifi_reboot_timeout` and `mqtt_reboot_timeout` both default to **`0s`**, which **disables** the
+  respective connectivity reboot outright. Verified against ESPHome 2026.5.1 source — both components
+  guard `App.reboot()` with `reboot_timeout_ != 0` (`wifi/wifi_component.cpp:867`,
+  `mqtt/mqtt_client.cpp:418`), so `0s` makes the reboot branch unreachable. ESPHome's stock default
+  is `15min` for both; leaving that in place would power-cycle a device every 15 minutes it is
+  offline. Both stay overridable per device — only the default is pinned to `0s`.
+- **No component may introduce a connectivity-driven reboot.** `ota.yaml`'s rollback watchdog is
+  gated so it only ever affects a firmware image still pending verification right after an OTA — a
+  confirmed image that is merely long-offline is never rolled back (see the OTA rollback section).
+- **Regression guard.** `scripts/check-offline-survival.sh` (wired into `validate.yml`, with a
+  self-test proving it fails on a known-bad `reboot_timeout: 15min`) fails the build if any
+  `reboot_timeout` default under `modules/` or `hardware/` resolves to a non-zero value.
+
+#### The `infinite_*` idioms
+
+`core.yaml` also restores legacy's two "infinite" sentinels as documented `lower_snake_case`
+substitutions (it declares them but does not itself consume them — they are for consuming device
+configs):
+
+- `infinite_update_interval` = `4294967295ms` (2³²−1 ms, the largest `uint32` duration ESPHome
+  accepts) — the **"never auto-publish"** `update_interval`: a periodic sensor set to it publishes
+  only on an explicit `publish_state()`, never on a timer.
+- `infinite_int_value` = `4294967295` (2³²−1) — an **unbounded `max_value`** / sentinel for numeric
+  fields.
 
 ### Logging is off in production by default
 
@@ -169,6 +203,18 @@ is a rolling stream: each line overwrites the last, so a retained log topic make
 one arbitrary, stale log line to every new subscriber — never what a log consumer wants.
 `tests/validate/mqtt_log_optin.yaml` exercises this opt-in path.
 
+### OTA rollback watchdog is offline-safe
+
+`ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
+broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
+known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+`esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
+unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
+a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
+The watchdog is therefore gated on `ESP_OTA_IMG_PENDING_VERIFY` (ESP-IDF's own idiom in
+`esp_ota_begin`): only a freshly-flashed, not-yet-verified image can roll back; a confirmed,
+long-offline image is never touched. OTA safety is preserved and offline survival is guaranteed.
+
 ## `${sdk_ref}` — pinning the components with the YAML
 
 ESPHome treats `packages:` and `external_components:` as **independent** git sources: a module
@@ -226,7 +272,7 @@ esphome-sdk/
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
   tests/negative/               # configs that MUST fail (missing required substitutions)
-  scripts/                      # CI check scripts (automation-syntax, sdk-ref, negative)
+  scripts/                      # CI check scripts (automation-syntax, sdk-ref, negative, offline-survival)
   .github/workflows/            # validate (PR) and release (tag) CI
 ```
 
@@ -234,8 +280,10 @@ esphome-sdk/
 
 - **`validate.yml`** runs on every pull request: it materializes the PR head SHA into each validate
   config's package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs
-  the `check-automation-syntax.sh`, `check-sdk-ref.sh` and `check-negative.sh` gates. This validates
-  the *revision under test*, never a published tag.
+  the `check-automation-syntax.sh`, `check-sdk-ref.sh`, `check-negative.sh` and
+  `check-offline-survival.sh` gates (the last fails the build if any `reboot_timeout` default under
+  `modules/`/`hardware/` is non-zero — the offline-survival invariant). This validates the *revision
+  under test*, never a published tag.
 - **`release.yml`** runs on a version tag: it materializes `GITHUB_REF_NAME`, asserts every fixture
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.

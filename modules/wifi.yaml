@@ -9,7 +9,21 @@
 # 2026.5.1). wifi_reboot_timeout is the one optional input this module owns.
 
 substitutions:
-  wifi_reboot_timeout: 15min
+  # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the WiFi reboot
+  # outright, so a device on a flaky uplink rides out an outage instead of power-cycling through it.
+  # Proven, not assumed — ESPHome 2026.5.1 wifi_component.cpp:867-871:
+  #     if (!this->has_ap() && this->reboot_timeout_ != 0) {
+  #       if (now - this->last_connected_ > this->reboot_timeout_) { ... App.reboot(); }
+  #     }
+  # set_reboot_timeout(0) leaves reboot_timeout_ == 0, so the `!= 0` guard is false and App.reboot()
+  # is unreachable — the timeout is never armed. (Belt-and-suspenders: the same line also requires
+  # `!this->has_ap()`, and this module ALWAYS configures a fallback AP, so the reboot is doubly
+  # disabled here.) Legacy pinned WIFI_REBOOT_TIMEOUT to 0s for exactly this reason; ESPHome's stock
+  # default is 15min (wifi/__init__.py:458), which the SDK port silently adopted and this restores.
+  # Overridable per device, but the DEFAULT must stay 0s — scripts/check-offline-survival.sh (wired
+  # into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
+  # non-zero, so this can never silently regress again.
+  wifi_reboot_timeout: 0s
 
 wifi:
   ssid: "${ wifi_ssid if wifi_ssid is defined else 1/0 }"
