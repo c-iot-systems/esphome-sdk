@@ -1,0 +1,99 @@
+name: release
+
+# On a version tag, compile for real. `esphome config` validates a component's Python and schema
+# but never builds its C++, so a component that does not compile can pass PR validation. Release
+# CI materializes GITHUB_REF_NAME (the tag) into every validate fixture, asserts each fixture
+# resolves to exactly that tag, and runs a real `esphome compile` — so no version is ever
+# published without every shipped component having been built at least once.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  ESPHOME_VERSION: "2026.5.1"
+  SDK_REF: ${{ github.ref_name }}
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+
+      - name: Assert this is a tag ref
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "::error::release.yml must run on a tag, got ref_type='${{ github.ref_type }}'"
+            exit 1
+          fi
+          echo "Releasing tag: ${SDK_REF}"
+
+      - name: Automation list-syntax gate
+        run: |
+          bash scripts/check-automation-syntax.sh --self-test
+          bash scripts/check-automation-syntax.sh
+
+      - name: SDK ref-consistency gate
+        run: |
+          bash scripts/check-sdk-ref.sh --self-test
+          bash scripts/check-sdk-ref.sh
+
+      - name: Materialize the released tag into validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures yet — nothing to compile."
+            exit 0
+          fi
+          echo "Materializing SDK_REF=${SDK_REF} into ${#files[@]} fixture(s)"
+          for f in "${files[@]}"; do
+            sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
+          done
+          # Guard: no placeholder survives, and every resolved ref is exactly the tag being released.
+          # Scan only the YAML fixtures — tests/validate/README.md documents the literal
+          # __SDK_REF__ placeholder and must not be treated as a fixture.
+          if grep -l '__SDK_REF__' "${files[@]}" ; then
+            echo "::error::A fixture still contains __SDK_REF__ after materialization"
+            exit 1
+          fi
+          bad=0
+          for f in "${files[@]}"; do
+            while IFS= read -r val; do
+              if [ "$val" != "${SDK_REF}" ]; then
+                echo "::error::${f}: resolved ref '${val}' != released tag '${SDK_REF}'"
+                bad=1
+              fi
+            done < <(grep -oE '(^[[:space:]]*ref:|sdk_ref:)[[:space:]]*[^},[:space:]]+' "$f" \
+                       | sed -E 's/.*:[[:space:]]*//')
+          done
+          [ "$bad" -eq 0 ]
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: esphome compile over validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures yet — scaffold has nothing to compile."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "== esphome compile $f =="
+            esphome compile "$f"
+          done
