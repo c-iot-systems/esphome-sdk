@@ -79,8 +79,31 @@ the modules it imports.
 | `logger_level` | no | `INFO` | |
 
 **No credential has a default.** A default password in a public repo is a default password in every
-device that forgets to override it. A missing required substitution must fail validation loudly —
-which is exactly what the PR-time `esphome config` check catches.
+device that forgets to override it. A missing required substitution must fail validation loudly, and
+the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+
+### Required substitutions fail loudly — the guard idiom
+
+Merely *referencing* `${x}` does **not** make a substitution required. ESPHome 2026.5.1 runs the
+substitution pass non-strict (`components/substitutions/__init__.py`): an undefined `${x}` only logs
+a **warning** and leaves the literal text in place, so `esphome config` still exits 0 unless the
+leftover literal happens to break a field's schema. `device_name` is the lucky case — it lands in
+`esphome: name:`, whose identifier schema rejects the `${device_name}` literal. Every other required
+substitution lands in a free-form string field that accepts the literal, so each is wrapped in a
+guard:
+
+```yaml
+password: "${ wifi_password if wifi_password is defined else 1/0 }"
+```
+
+When the value is present the expression returns it unchanged; when it is missing the
+`ZeroDivisionError` is re-raised as a hard `cv.Invalid` (the non-strict pass demotes `UndefinedError`
+to a warning but re-raises every *other* expression error), so `esphome config` exits non-zero with
+the offending expression — which names the variable — in the message. **Any module that adds a
+required substitution to a free-form field must apply this guard** (`criotive_mqtt.yaml` and
+`ota.yaml` do so for their credentials). `tests/negative/` proves each required input fails when
+omitted, and `scripts/check-negative.sh` (wired into `validate.yml`) asserts every negative fixture
+exits non-zero.
 
 ### MQTT is TLS only when a CA is configured
 
@@ -147,7 +170,8 @@ esphome-sdk/
   hardware/                     # hds_v1_0, hds_v1_1, hds_v2_0
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
-  scripts/                      # CI check scripts (automation-syntax, sdk-ref)
+  tests/negative/               # configs that MUST fail (missing required substitutions)
+  scripts/                      # CI check scripts (automation-syntax, sdk-ref, negative)
   .github/workflows/            # validate (PR) and release (tag) CI
 ```
 
@@ -155,8 +179,8 @@ esphome-sdk/
 
 - **`validate.yml`** runs on every pull request: it materializes the PR head SHA into each validate
   config's package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs
-  the `check-automation-syntax.sh` and `check-sdk-ref.sh` gates. This validates the *revision under
-  test*, never a published tag.
+  the `check-automation-syntax.sh`, `check-sdk-ref.sh` and `check-negative.sh` gates. This validates
+  the *revision under test*, never a published tag.
 - **`release.yml`** runs on a version tag: it materializes `GITHUB_REF_NAME`, asserts every fixture
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.
