@@ -65,22 +65,92 @@ the modules it imports.
 | `wifi_ssid` | **yes** | — | *(`wifi.yaml`)* |
 | `wifi_password` | **yes** | — | *(`wifi.yaml`)* — **no default, ever** |
 | `wifi_ap_password` | **yes** | — | fallback AP; **no default, ever** |
-| `wifi_reboot_timeout` | no | `15min` | *(`wifi.yaml`)* |
+| `wifi_reboot_timeout` | no | `0s` | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
 | `mqtt_broker` | **yes** | — | *(`criotive_mqtt.yaml`)* |
 | `mqtt_ca_certificate` | **yes** | — | **the TLS trust anchor — see below** |
 | `mqtt_port` | no | `8883` | conventional TLS port; the port alone does **not** enable TLS |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
-| `mqtt_reboot_timeout` | no | `15min` | |
+| `mqtt_reboot_timeout` | no | `0s` | `0s` **disables** the MQTT reboot (offline survival) |
 | `mqtt_discovery` | no | `true` | Home Assistant discovery |
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
-| `ota_attempts` | no | `5` | safe-mode attempts |
+| `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
-| `logger_level` | no | `INFO` | |
+| `logger_level` | no | `NONE` | logging is **off by default** — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
-device that forgets to override it. A missing required substitution must fail validation loudly —
-which is exactly what the PR-time `esphome config` check catches.
+device that forgets to override it. A missing required substitution must fail validation loudly, and
+the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+
+### A device never reboots through an outage — offline survival is an invariant
+
+**A device MUST continue operating indefinitely while offline, without rebooting.** Field units —
+freezer monitors, escape-room props — sit on flaky uplinks and must ride out an outage rather than
+power-cycle through it. This is not a preference; legacy pinned both reboot timeouts to `0s` years
+ago for exactly this reason, and the SDK restores it.
+
+- `wifi_reboot_timeout` and `mqtt_reboot_timeout` both default to **`0s`**, which **disables** the
+  respective connectivity reboot outright. Verified against ESPHome 2026.5.1 source — both components
+  guard `App.reboot()` with `reboot_timeout_ != 0` (`wifi/wifi_component.cpp:867`,
+  `mqtt/mqtt_client.cpp:418`), so `0s` makes the reboot branch unreachable. ESPHome's stock default
+  is `15min` for both; leaving that in place would power-cycle a device every 15 minutes it is
+  offline. Both stay overridable per device — only the default is pinned to `0s`.
+- **No component may introduce a connectivity-driven reboot.** `ota.yaml`'s rollback watchdog is
+  gated so it only ever affects a firmware image still pending verification right after an OTA — a
+  confirmed image that is merely long-offline is never rolled back (see the OTA rollback section).
+- **Regression guard.** `scripts/check-offline-survival.sh` (wired into `validate.yml`, with a
+  self-test proving it fails on a known-bad `reboot_timeout: 15min`) fails the build if any
+  `reboot_timeout` default under `modules/` or `hardware/` resolves to a non-zero value.
+
+#### "Never auto-publish": use `update_interval: never`
+
+Legacy expressed a "never auto-publish" periodic sensor with an `INFINITE_UPDATE_INTERVAL`
+(`4294967295ms`) sentinel. The SDK does **not** carry that magic value: ESPHome's `update_interval:
+never` literal says the same thing far more clearly and is already used at every legacy use site
+(`firmware_version`, `sensor_boots`, `ota_status`, `google_location`). Future entities that should
+publish only on an explicit `publish_state()` must use `never`, not a numeric sentinel.
+
+### Logging is off in production by default
+
+`logger_level` defaults to **`NONE`**: a device ships silent and its `logger:` emits nothing until a
+consumer raises the level **deliberately**. This mirrors the legacy firmware, whose ESPHome baseline
+was `LOGGER_LEVEL: "NONE"` and was only raised by opting into a named environment
+(`info` / `debug` / `verbose` / `veryverbose`) — never on by default. A chatty default is not free:
+it costs flash, CPU and (when a device also publishes logs) broker traffic on every unit that forgot
+to turn it down.
+
+To raise it, set the substitution per device to one of ESPHome's levels — `INFO`, `DEBUG`,
+`VERBOSE` or `VERY_VERBOSE`:
+
+```yaml
+substitutions:
+  logger_level: DEBUG   # opt in per device; production stays NONE
+```
+
+The knob is unchanged — only its default flipped from `INFO` back to `NONE`.
+
+### Required substitutions fail loudly — the guard idiom
+
+Merely *referencing* `${x}` does **not** make a substitution required. ESPHome 2026.5.1 runs the
+substitution pass non-strict (`components/substitutions/__init__.py`): an undefined `${x}` only logs
+a **warning** and leaves the literal text in place, so `esphome config` still exits 0 unless the
+leftover literal happens to break a field's schema. `device_name` is the lucky case — it lands in
+`esphome: name:`, whose identifier schema rejects the `${device_name}` literal. Every other required
+substitution lands in a free-form string field that accepts the literal, so each is wrapped in a
+guard:
+
+```yaml
+password: "${ wifi_password if wifi_password is defined else 1/0 }"
+```
+
+When the value is present the expression returns it unchanged; when it is missing the
+`ZeroDivisionError` is re-raised as a hard `cv.Invalid` (the non-strict pass demotes `UndefinedError`
+to a warning but re-raises every *other* expression error), so `esphome config` exits non-zero with
+the offending expression — which names the variable — in the message. **Any module that adds a
+required substitution to a free-form field must apply this guard** (`criotive_mqtt.yaml` and
+`ota.yaml` do so for their credentials). `tests/negative/` proves each required input fails when
+omitted, and `scripts/check-negative.sh` (wired into `validate.yml`) asserts every negative fixture
+exits non-zero.
 
 ### MQTT is TLS only when a CA is configured
 
@@ -147,7 +217,8 @@ esphome-sdk/
   hardware/                     # hds_v1_0, hds_v1_1, hds_v2_0
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
-  scripts/                      # CI check scripts (automation-syntax, sdk-ref)
+  tests/negative/               # configs that MUST fail (missing required substitutions)
+  scripts/                      # CI check scripts (automation-syntax, sdk-ref, negative, offline-survival)
   .github/workflows/            # validate (PR) and release (tag) CI
 ```
 
@@ -155,8 +226,10 @@ esphome-sdk/
 
 - **`validate.yml`** runs on every pull request: it materializes the PR head SHA into each validate
   config's package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs
-  the `check-automation-syntax.sh` and `check-sdk-ref.sh` gates. This validates the *revision under
-  test*, never a published tag.
+  the `check-automation-syntax.sh`, `check-sdk-ref.sh`, `check-negative.sh` and
+  `check-offline-survival.sh` gates (the last fails the build if any `reboot_timeout` default under
+  `modules/`/`hardware/` is non-zero — the offline-survival invariant). This validates the *revision
+  under test*, never a published tag.
 - **`release.yml`** runs on a version tag: it materializes `GITHUB_REF_NAME`, asserts every fixture
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.

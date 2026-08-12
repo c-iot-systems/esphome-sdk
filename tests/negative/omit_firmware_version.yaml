@@ -1,0 +1,17 @@
+# NEGATIVE — MUST FAIL. Omits firmware_version (required by core.yaml); every other required
+# substitution is present. Proves core.yaml gives firmware_version no default.
+substitutions:
+  device_name: neg-device
+  # firmware_version intentionally omitted
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+packages:
+  core: !include { file: ../../modules/core.yaml, vars: {sdk_ref: local-test} }
+  wifi: !include { file: ../../modules/wifi.yaml, vars: {sdk_ref: local-test} }
