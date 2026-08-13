@@ -1,9 +1,10 @@
-# hds_v1_1 — concrete board definition + pin map for the v1.1 board (arduino framework).
+# hds_v1_1 — concrete board definition + pin map for the v1.1 board.
 #
-# Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino) — never
-# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. The esp-idf build of this same board is
-# hds_v1_1_idf.yaml, which reuses everything here and only swaps the framework; a device imports
-# exactly one of the two.
+# Board and variant are CONCRETE (esp32dev / esp32) — never ${DEVICE_BOARD}/${DEVICE_VARIANT}
+# templating. The build FRAMEWORK is the one esp32 field that varies per device, so it is consumed
+# as ${framework_variant} (default esp-idf, declared in modules/core.yaml) inside this file's own
+# esp32.framework — one board file serves both the esp-idf and arduino builds instead of a doubled
+# _idf sibling. A device selects the arduino toolchain with framework_variant: arduino.
 #
 # This board has no indicator LEDs, so it ships no OTA visual feedback (no module reaches into a
 # hardware id either way).
@@ -201,7 +202,17 @@ esp32:
   board: esp32dev
   variant: esp32
   framework:
-    type: arduino
+    # Board and variant are concrete; only the framework varies per device. Default esp-idf (see
+    # modules/core.yaml); override framework_variant: arduino to build against arduino. Substitution
+    # runs before schema validation, so ${framework_variant} resolves to a literal the esp32 schema
+    # then checks — the same pattern can_resistor_status already uses.
+    type: ${framework_variant}
+    advanced:
+      # Pin OTA rollback support ON so the ota.yaml watchdog stays armed on esp-idf (defines
+      # USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, deferring boot-time confirmation to
+      # safe_mode). ESPHome's default when safe_mode is present; pinned so a default change can't
+      # silently disarm it. No effect on an arduino build. See hds_v1_0.yaml / the README for detail.
+      enable_ota_rollback: true
 
 switch:
   - platform: gpio

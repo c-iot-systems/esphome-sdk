@@ -19,6 +19,7 @@
 #   | firmware_version     | yes      | —       | core.yaml          | published as a text sensor   |
 #   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
 #   | logger_level         | no       | NONE    | core.yaml          | prod-off; raise deliberately |
+#   | framework_variant    | no       | esp-idf | core.yaml          | esp32 framework: esp-idf|arduino |
 #   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
 #   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
 #   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
@@ -84,8 +85,20 @@
 # raises it DELIBERATELY per device — logger_level: INFO (or DEBUG/VERBOSE/VERY_VERBOSE) — never the
 # SDK shipping every device chatty by default. A chatty default is not free: it costs flash, CPU and
 # (when a device also publishes logs) broker traffic on every unit that forgot to turn it down.
+#
+# framework_variant selects the esp32 build framework a hardware file compiles against. It is a
+# substitution rather than a doubled board file: a hardware file keeps its CONCRETE board and variant
+# but consumes ${framework_variant} inside its own esp32.framework.type (see hardware/hds_*.yaml),
+# so one board file serves both frameworks and the two can never drift. core.yaml declares only the
+# DEFAULT here — it does NOT declare an esp32: block (board, variant and framework are one logical
+# block owned by the hardware file). The valid tokens are the two ESPHome esp32 framework names,
+# esp-idf and arduino. The default is esp-idf: on esp-idf the ota.yaml post-boot rollback watchdog
+# (#ifdef USE_ESP_IDF) is compiled in, so a default build ships the OTA rollback protection; a
+# device that wants the arduino toolchain overrides framework_variant: arduino per device and gives
+# that protection up (see the README OTA + framework sections).
 substitutions:
   logger_level: NONE
+  framework_variant: esp-idf
 
 esphome:
   name: ${device_name}
