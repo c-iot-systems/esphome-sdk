@@ -18,8 +18,8 @@ substitutions:
   # set_reboot_timeout(0) leaves reboot_timeout_ == 0, so the `!= 0` guard is false and App.reboot()
   # is unreachable — the timeout is never armed. (Belt-and-suspenders: the same line also requires
   # `!this->has_ap()`, and this module ALWAYS configures a fallback AP, so the reboot is doubly
-  # disabled here.) Legacy pinned WIFI_REBOOT_TIMEOUT to 0s for exactly this reason; ESPHome's stock
-  # default is 15min (wifi/__init__.py:458), which the SDK port silently adopted and this restores.
+  # disabled here.) ESPHome's stock default is 15min (wifi/__init__.py:458), which would power-cycle a
+  # device every 15 minutes it is offline; 0s is pinned here to prevent that.
   # Overridable per device, but the DEFAULT must stay 0s — scripts/check-offline-survival.sh (wired
   # into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
   # non-zero, so this can never silently regress again.
@@ -47,7 +47,7 @@ captive_portal:
 
 esphome:
   on_boot:
-    # Preserve the legacy fallback-AP SSID rule: a WiFi SSID is limited to 31 characters, so start
+    # Fallback-AP SSID rule: a WiFi SSID is limited to 31 characters, so start
     # from "criotive - <device_name>" and, when that overflows, drop the "criotive - " prefix FIRST;
     # if the bare device name is still too long, keep its right-most 31 characters. Runs at a high
     # priority so the AP is reconfigured before the WiFi component brings the access point up.

@@ -32,7 +32,7 @@
 #   | mqtt_reboot_timeout  | no       | 0s      | criotive_mqtt.yaml | 0s = reboot DISABLED (offline) |
 #   | mqtt_discovery       | no       | true    | criotive_mqtt.yaml | Home Assistant discovery     |
 #   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |
-#   | ota_attempts         | no       | 50      | ota.yaml           | safe-mode attempts (legacy)  |
+#   | ota_attempts         | no       | 50      | ota.yaml           | safe-mode boot attempts      |
 #   | ota_http_server      | yes      | —       | ota.yaml           | HTTPS OTA download host       |
 #
 # sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
@@ -49,7 +49,7 @@
 # respective connectivity reboot OUTRIGHT — verified against ESPHome 2026.5.1 source, both components
 # guard App.reboot() with `reboot_timeout_ != 0` (wifi/wifi_component.cpp:867, mqtt/mqtt_client.cpp:418),
 # so set_reboot_timeout(0) makes the reboot branch unreachable. ESPHome's stock default is 15min for
-# both; the SDK restores legacy's 0s. No module may (re)introduce a connectivity-driven reboot — this
+# both; the SDK pins 0s. No module may (re)introduce a connectivity-driven reboot — this
 # includes ota.yaml's rollback watchdog, which is gated on ESP_OTA_IMG_PENDING_VERIFY so a confirmed,
 # long-offline image is never rolled back (see ota.yaml). scripts/check-offline-survival.sh (wired
 # into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
