@@ -1,13 +1,17 @@
 # Positive validate fixture — exercises the hds_v1_1 slot pin table by NAME. It imports the hds_v1_1
-# hardware module (which owns the slot_<n>_<module>_<signal> substitutions) plus core + wifi, and
-# wires one substitution PER MODULE TYPE the board supports into a gpio binary_sensor pin. If any slot
+# hardware module (which owns the slot_<n>_<module>_<signal> substitutions) plus core + wifi +
+# controls, and wires one substitution PER MODULE TYPE the board supports into a gpio binary_sensor
+# pin. If any slot
 # name is typo'd, its ${...} stays a literal and the pin schema rejects it ("Cannot resolve pin
 # name"), so `esphome config` fails — that is what makes the names exercised rather than merely
 # declared. Distinct pins are chosen per module type so no two inputs collide (ESPHome rejects a
 # reused pin). ignore_pin_validation_error is set because some legitimate slot pins are flash/strapping
 # pins on these modules that ESPHome's generic ESP32 check would otherwise reject — it does NOT hide a
-# mistyped name. wifi is imported because core's time.sntp needs a network component. The pin VALUES
-# are validated against the board data in the PR, not here — nothing flashes hardware.
+# mistyped name. wifi is imported because core's time.sntp needs a network component; controls is
+# imported because hds_v1_1 wires the on-board SW1 button, whose on_click presses button_restart /
+# button_factory (owned by controls.yaml) — so any fixture importing this board must import controls
+# too, or those id references do not resolve. The pin VALUES are validated against the board data in
+# the PR, not here — nothing flashes hardware.
 #
 # CI materializes __SDK_REF__ into the revision under test (see tests/validate/README.md).
 substitutions:
@@ -82,4 +86,6 @@ packages:
       - path: modules/core.yaml
         vars: {sdk_ref: __SDK_REF__}
       - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
         vars: {sdk_ref: __SDK_REF__}
