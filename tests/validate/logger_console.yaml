@@ -1,3 +1,5 @@
+# Fixture: logger_baud_rate and logger_hardware_uart at NON-default values. It rides the S3 because
+# USB_SERIAL_JTAG takes no board GPIO; the classic console-on path is hds_v1_1.yaml.
 substitutions:
   device_name: logger-console-testdev
   firmware_version: "0.0.0-test"

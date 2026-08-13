@@ -1,3 +1,5 @@
+# Fixture: hds_v1_0 on the ARDUINO framework — exercises ${framework_variant} rather than declaring
+# it. The oracle for the required pairing of framework_variant: arduino with ota_rollback: false.
 substitutions:
   device_name: hds-v1-0-arduino-testdev
   firmware_version: "0.0.0-test"

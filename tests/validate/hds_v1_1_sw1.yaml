@@ -1,3 +1,5 @@
+# Fixture: hds_v1_1 with SW1 ENABLED (the flag's default). Imports controls.yaml so SW1's on_click
+# id references resolve; the console stays off because SW1 owns GPIO1. Sibling: hds_v1_1.yaml.
 substitutions:
   device_name: hds-v1-1-sw1-testdev
   firmware_version: "0.0.0-test"

@@ -1,3 +1,5 @@
+# Fixture: core + wifi with station slot 1 only. The deliberately long device_name proves the AP
+# SSID is a short constant validated at config time, not the 32-char-overflowing prefixed name.
 substitutions:
   device_name: core-wifi-boundary-testdev
   firmware_version: "0.0.0-test"

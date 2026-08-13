@@ -1,3 +1,5 @@
+# Fixture: mqtt_client_id set DIFFERENT from device_name — proves client_id and topic_prefix stay
+# independent, so a broker with client-id rules is satisfied without moving the topic prefix.
 substitutions:
   device_name: mqtt-clientid-testdev
   mqtt_client_id: "custom-client-id-01"
