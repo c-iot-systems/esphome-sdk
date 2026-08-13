@@ -1,6 +1,3 @@
-# NEGATIVE — MUST FAIL. Omits mqtt_ca_certificate (required by criotive_mqtt.yaml); every other
-# required substitution is present. Without the CA the MQTT transport is plaintext on port 8883, so
-# the CA is required with no default and its omission must fail loudly.
 substitutions:
   device_name: neg-device
   firmware_version: "0.0.0-test"
@@ -9,7 +6,6 @@ substitutions:
   wifi_ap_password: test-ap-password
   mqtt_broker: mqtt.test.invalid
   mqtt_port: "8883"
-  # mqtt_ca_certificate intentionally omitted
   mqtt_username: test-mqtt-user
   mqtt_password: test-mqtt-password
   ota_password: test-ota-password

@@ -1,50 +1,5 @@
-# hds_v1_0 — concrete board definition + pin map for the v1.0 board.
-#
-# A hardware file owns the platform component (esp32:) and the board-specific I/O. Board and variant
-# are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. The build FRAMEWORK is the
-# one esp32 field that varies per device, so it is consumed as ${framework_variant} (default esp-idf,
-# declared in modules/core.yaml) inside this file's own esp32.framework — one board file now serves
-# both the esp-idf and arduino builds instead of a doubled _idf sibling. A device selects the
-# arduino toolchain with framework_variant: arduino.
-#
-# This board has no indicator LEDs, so it ships no OTA visual feedback. The rule still holds: a
-# hardware file WITH LEDs would drive its own OTA feedback by its own ids, and no module reaches
-# into a hardware id.
-#
-# Fixed pin map:
-#   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
-#
-# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
-# segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
-# Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
-#
-# ── Serial console / logger ───────────────────────────────────────────────────────────────────
-# The serial console is OFF by default: modules/core.yaml sets logger_baud_rate: 0, which skips UART
-# init entirely, so this board ships silent on the wire. Raising serial logs needs BOTH a non-NONE
-# logger_level AND a non-zero logger_baud_rate — the two are independent (level gates record
-# production, baud_rate gates UART init). On this classic-ESP32 board the console lands on UART0,
-# whose TX is GPIO1 (U0TXD); UART1/UART2's default pins are wired to flash on typical modules and the
-# logger schema exposes no tx_pin override.
-#
-# So the same classic-ESP32 hardware constraint applies: a GPIO1 button and a serial console are
-# mutually exclusive AT THE HARDWARE LEVEL — both need GPIO1 (U0TXD) and there is no way to keep both.
-# This is a hardware fact, not a configuration choice, and raising logger_baud_rate does NOT free
-# GPIO1. On hds_v1_1 the on-board SW1 button hits exactly this, and the way out is the compile-time
-# hds_v1_1_sw1_enabled flag: set it false to drop SW1 and free GPIO1 for a serial console (see
-# hardware/hds_v1_1.yaml, modules/core.yaml and the README). This v1.0 board wires NO on-board button
-# of its own, so GPIO1 is free out of the box and its serial console is unconflicted — a device just
-# sets a non-zero logger_baud_rate and imports no GPIO1 sensor.
-#
-# ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
-# This board carries seven module slots. Each substitution below resolves ONE module signal, for a
-# given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that
-# wires, say, a Double Relay into slot 3 references ${slot_3_double_relay_relay_1} as that relay's
-# pin. The values are static: they were read directly from the board's slot/module data (the physical
-# per-slot GPIO table and each module's signal-to-lane mapping) and only combinations that physically
-# fit the board are listed. The SDK CANNOT check that a slot actually holds the module a name refers
-# to — it never sees a device's populated slot map — so choosing the right name for the module a slot
-# really holds is the consumer's responsibility (see the README).
 substitutions:
+  # Only CAN endpoints should enable termination.
   can_resistor_status: ALWAYS_ON
   slot_1_triple_digital_input_in1: "7"
   slot_1_triple_digital_input_in2: "8"
@@ -169,21 +124,9 @@ esp32:
   board: pico32
   variant: esp32
   framework:
-    # Board and variant are concrete; only the framework varies per device. Default esp-idf (see
-    # modules/core.yaml); override framework_variant: arduino to build against arduino. Substitution
-    # is textual and runs BEFORE schema validation, so ${framework_variant} resolves to a literal
-    # framework name the esp32 schema then checks — the same pattern can_resistor_status already uses.
     type: ${framework_variant}
     advanced:
-      # OTA rollback support, driven by ${ota_rollback} (default true; see modules/core.yaml). On
-      # esp-idf this defines USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, which defers
-      # the boot-time image confirmation to safe_mode — esp32/hal.cpp guards its immediate
-      # esp_ota_mark_app_valid_cancel_rollback() with #ifndef USE_OTA_ROLLBACK — the deferral
-      # ota.yaml's rollback watchdog depends on. ESPHome emits this on BOTH frameworks (not just
-      # esp-idf), but the SDK's watchdog and MQTT confirmation are #ifdef USE_ESP_IDF, so an arduino
-      # device MUST pair framework_variant: arduino with ota_rollback: false — otherwise confirmation
-      # is deferred with no watchdog and no broker cancel and a healthy fresh image could roll back.
-      # With ota_rollback: false, USE_OTA_ROLLBACK is undefined and rollback exists only on esp-idf.
+      # Arduino builds require ota_rollback: "false".
       enable_ota_rollback: ${ota_rollback}
 
 switch:

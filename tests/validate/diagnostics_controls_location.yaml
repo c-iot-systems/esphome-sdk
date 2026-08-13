@@ -1,17 +1,5 @@
-# Positive validate fixture — imports core + diagnostics + controls + location (plus wifi) at the
-# REVISION UNDER TEST, with an inline esp32 hardware stub, and must pass `esphome config` with no
-# duplicate-id errors. CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md)
-# into the PR head SHA, so the branch's own modules — and google_location's C++ component, fetched
-# from git at ${sdk_ref} — resolve to the revision under review, never a published tag.
-# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
-#
-# wifi.yaml is imported because google_location declares DEPENDENCIES = ["wifi"]: the component scans
-# Wi-Fi APs, so `esphome config` fails without a wifi: component present. It is a dependency of the
-# module under test, not extra scope. The acceptance's "all three plus core" is the floor; wifi is
-# what location actually needs to validate.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no
-# value here is a real credential.
+# Fixture: core + diagnostics + controls + location must validate with no duplicate ids. wifi is
+# imported because google_location declares DEPENDENCIES = ["wifi"], not as extra scope.
 substitutions:
   device_name: diag-ctl-loc-testdev
   firmware_version: "0.0.0-test"
@@ -19,7 +7,6 @@ substitutions:
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
 
-# Inline hardware stub — SDK-4 owns no hardware module, so the fixture supplies the platform itself.
 esp32:
   board: esp32dev
   framework:

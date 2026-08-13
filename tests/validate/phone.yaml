@@ -1,17 +1,5 @@
-# Positive validate fixture for the phone optional-hardware module.
-#
-# Imports ONLY modules/phone.yaml at the REVISION UNDER TEST (CI materializes __SDK_REF__ — see
-# tests/validate/README.md), supplies an inline esphome/esp32 stub, and instantiates `phone:` as a
-# 4x3 telephone keypad. The number of keys must equal rows * columns (the component's check_keys
-# validator), so a 4-row x 3-column matrix carries the 12-key layout below. Release CI compiles this
-# fixture for real, so the driver's C++ is built at least once per release.
-#
-# The fixture is deliberately self-contained (inline esphome/esp32 rather than importing core.yaml):
-# this optional driver needs no network, sntp or credentials, so pulling in core+wifi just to satisfy
-# core's sntp/network requirement would couple the fixture to modules it does not exercise. It still
-# exercises the module's own external_components git source pinned to ${sdk_ref} and the packages/vars
-# threading — check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
-# The repo is public, so no value here is a real credential.
+# Fixture: the phone driver as a 4x3 telephone keypad — the key count must equal rows * columns.
+# Self-contained rather than importing core, since the driver needs no network. Release CI compiles it.
 esphome:
   name: phone-testdev
 
@@ -22,9 +10,6 @@ esp32:
 
 logger:
 
-# Instantiate the driver as a 4x3 matrix keypad. Rows are driven outputs, columns are read inputs;
-# a real device wires its own pins (native GPIO or a tca8418 expander pin) and adds hook sensor /
-# passwords as needed.
 phone:
   - id: prop_phone
     rows:

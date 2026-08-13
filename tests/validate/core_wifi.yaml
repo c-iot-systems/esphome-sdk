@@ -1,16 +1,5 @@
-# Positive validate fixture — imports core.yaml + wifi.yaml at the REVISION UNDER TEST plus an
-# inline esp32 hardware stub, and must pass `esphome config`. CI materializes the __SDK_REF__
-# placeholder (see tests/validate/README.md) into the PR head SHA before running, so the branch's
-# own modules are fetched from GitHub, never a published tag. check-sdk-ref.sh asserts the package
-# `ref` and every `vars.sdk_ref` are the placeholder.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no
-# value here is a real credential.
-#
-# device_name is deliberately long (26 chars): "criotive - " + this name is 37 chars, over the
-# 32-char AP-SSID limit. This config passing proves the AP SSID is a short constant validated at
-# config time (the on_boot lambda computes the length-safe SSID at runtime) — a name this long
-# would fail config if the prefixed name were the static AP SSID.
+# Fixture: core + wifi with station slot 1 only. The deliberately long device_name proves the AP
+# SSID is a short constant validated at config time, not the 32-char-overflowing prefixed name.
 substitutions:
   device_name: core-wifi-boundary-testdev
   firmware_version: "0.0.0-test"
@@ -18,7 +7,6 @@ substitutions:
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
 
-# Inline hardware stub — SDK-2 owns no hardware module, so the fixture supplies the platform itself.
 esp32:
   board: esp32dev
   framework:

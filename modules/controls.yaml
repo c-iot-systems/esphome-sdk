@@ -1,28 +1,10 @@
-# controls.yaml — the four device-lifecycle controls: shutdown, restart, safe-mode, factory-reset.
-#
-# Owns: the shutdown / restart / safe-mode / factory-reset buttons. Opt-in, no substitution inputs,
-# imports nothing.
-#
-# ── Built from standard button platforms only ─────────────────────────────────────────────────
-# Each control is a pair: a user-facing `template` button that waits 500 ms — long enough for its
-# button-press state to publish over MQTT — then presses an internal button on the standard
-# `shutdown` / `restart` / `safe_mode` / `factory_reset` platform that actually performs the action.
-# No custom component is involved. The internal action buttons are `internal: true`, so only the four
-# template buttons reach the exposed API / MQTT surface — exactly the four intended controls.
-#
-# The on-demand "Location Request" button is NOT here: it drives the google_location text sensor, so
-# it belongs with that component in location.yaml. Keeping it out of controls.yaml is what lets a
-# device import controls without also importing location.
-
+# Delays allow MQTT to publish before the device acts.
 button:
-  # User-facing controls. Each waits 500 ms so the button-press state can publish over MQTT before
-  # the device acts on it, then presses its matching internal action button. Explicit list syntax on
-  # every on_press (the automation-list-syntax invariant).
   - platform: template
     name: "Shutdown"
     on_press:
       - then:
-          - delay: 500ms  # A little time for MQTT to publish the press
+          - delay: 500ms
           - button.press: button_shutdown
   - platform: template
     name: "Restart"
@@ -43,9 +25,6 @@ button:
           - delay: 500ms
           - button.press: button_factory
 
-  # Internal action buttons — the standard ESPHome platforms that actually perform each action.
-  # internal: true keeps them off the exposed API / MQTT surface; the template buttons above are the
-  # only user-facing entry points.
   - platform: shutdown
     name: "Shutdown"
     id: button_shutdown
