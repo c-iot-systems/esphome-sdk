@@ -3,17 +3,19 @@
 # Owns: the `mqtt:` client, the topic prefix, the birth / last-will / shutdown (availability)
 # messages — all derived from ${device_name} — and the on_connect rollback confirmation. Required
 # inputs are scoped to THIS module (see the contract in core.yaml): importing criotive_mqtt.yaml
-# makes mqtt_broker, mqtt_ca_certificate, mqtt_username and mqtt_password mandatory. None has a
-# default — no credential ever ships a default in a public repo. mqtt_port, mqtt_reboot_timeout and
+# makes mqtt_broker, mqtt_ca_certificate, mqtt_username, mqtt_password and mqtt_port mandatory. None
+# has a default — no credential ever ships a default in a public repo, and mqtt_port carries no
+# default either: a connection parameter that could be silently wrong must be stated explicitly, so
+# omitting it fails validation via the same guard idiom (below). mqtt_reboot_timeout and
 # mqtt_discovery are the optional inputs this module owns; their defaults are declared below.
 #
 # ── MQTT is TLS ONLY when a CA is configured ──────────────────────────────────────────────────
 # Port 8883 does NOT enable TLS. Verified in ESPHome 2026.5.1: mqtt/__init__.py:439 calls
 # set_ca_certificate ONLY when `certificate_authority` is present; without it the transport is plain
 # TCP whatever the port, so credentials cross the network in the clear. criotive_mqtt.yaml therefore
-# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default (see
-# ADR-0022). The platform injects the broker's CA when generating the config, so staging and
-# production can differ and the CA can rotate without an SDK release.
+# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default. The
+# CA is supplied by the caller, so staging and production can use different trust anchors and the CA
+# can rotate without an SDK release.
 #
 # ── Required-substitution guard ───────────────────────────────────────────────────────────────
 # Merely referencing ${x} does not make it required: ESPHome's substitution pass is non-strict, so a
@@ -23,15 +25,29 @@
 # re-raised as a hard `esphome config` failure naming the variable. See core.yaml's header and the
 # README for the full rationale; tests/negative/ proves each omission fails.
 #
-# ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
-# The legacy on_boot MQTT lambda (NVS client-cert loading, the Azure/`were_certs_loaded` fallback
-# broker, the topic MAC suffix, the EMQX MQTT_BROKER_CLIENT_ID override) is gone. MQTT is the only
-# transport; there is no fallback broker path. The topic prefix and availability messages, which the
-# legacy set imperatively in that lambda, are now declared statically from ${device_name}. client_id
-# is left unset — ESPHome defaults it to the device name, which is the topic prefix.
+# ── The topic prefix and availability messages are declared statically ─────────────────────────
+# A single MQTT-over-TLS broker. The topic prefix and the birth/will/shutdown availability messages
+# are declared statically from ${device_name}. Not included: device-twin/Azure support — out of scope
+# for this SDK.
+#
+# ── client_id is set explicitly ────────────────────────────────────────────────────────────────
+# `mqtt_client_id` (optional, below) sets the MQTT client id explicitly, because ESPHome's OWN
+# default is unsuitable here: left unset, mqtt/mqtt_client.cpp:44 sets client_id to
+# `${device_name}-<mac>` (make_name_with_suffix). That matters for two reasons. First, SOME brokers
+# require `client_id == username`, and a MAC-suffixed id would not match. Second, some deployments
+# use the client id to namespace topics, so an unexpected id can misroute a device's messages. So
+# `client_id` is wired from `mqtt_client_id`, which DEFAULTS to ${device_name} (matching username and
+# topic_prefix for the common case) and is overridden per device when a deployment needs a specific
+# value. client_id and topic_prefix stay INDEPENDENT — a device may use a non-prefixed id while
+# keeping the device-name topic prefix — so mqtt_client_id is its own override, never derived from
+# the prefix.
 
 substitutions:
-  mqtt_port: "8883"
+  # OPTIONAL client-id override. Defaults to ${device_name}, so client_id == topic_prefix == the
+  # device name for the common case. Override per device when a deployment needs a specific client id
+  # — e.g. a broker that requires client_id == username, or one that namespaces topics by client id.
+  # Kept INDEPENDENT of topic_prefix — see the header note and README.
+  mqtt_client_id: ${device_name}
   # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the MQTT reboot
   # outright, so a device rides out a broker/uplink outage instead of power-cycling every timeout.
   # Proven, not assumed — ESPHome 2026.5.1 mqtt/mqtt_client.cpp:418-421:
@@ -39,8 +55,8 @@ substitutions:
   #       ... App.reboot();
   #     }
   # set_reboot_timeout(0) leaves reboot_timeout_ == 0, so the `!= 0` guard is false and App.reboot()
-  # is unreachable. Legacy pinned MQTT_REBOOT_TIMEOUT to 0s for exactly this reason; ESPHome's stock
-  # default is 15min (mqtt/__init__.py:285), which the SDK port silently adopted and this restores.
+  # is unreachable. ESPHome's stock default is 15min (mqtt/__init__.py:285), which would power-cycle a
+  # device every 15 minutes it is offline; 0s is pinned here to prevent that.
   # Overridable per device, but the DEFAULT must stay 0s — scripts/check-offline-survival.sh fails
   # the build if any reboot_timeout default under modules/ or hardware/ is non-zero.
   mqtt_reboot_timeout: 0s
@@ -49,7 +65,11 @@ substitutions:
 mqtt:
   id: mqtt_client
   broker: "${ mqtt_broker if mqtt_broker is defined else 1/0 }"
-  port: ${mqtt_port}
+  # REQUIRED, no default. A connection port that could be silently wrong must be stated explicitly, so
+  # mqtt_port uses the same forced-failure guard as the credentials: present -> the value; missing ->
+  # a ZeroDivisionError re-raised as a hard `esphome config` failure. 8883 is the conventional
+  # MQTT-over-TLS port, but the port alone does NOT enable TLS (that is mqtt_ca_certificate's job).
+  port: ${ mqtt_port if mqtt_port is defined else 1/0 }
   username: "${ mqtt_username if mqtt_username is defined else 1/0 }"
   password: "${ mqtt_password if mqtt_password is defined else 1/0 }"
   # The TLS trust anchor. Its PRESENCE — not the port — is what makes ESPHome call
@@ -58,6 +78,11 @@ mqtt:
   reboot_timeout: ${mqtt_reboot_timeout}
   discovery: ${mqtt_discovery}
   discover_ip: false
+  # client_id set EXPLICITLY — never left to ESPHome's ${device_name}-<mac> default (mqtt_client.cpp:44),
+  # so a broker that requires client_id == username, or that namespaces topics by client id, gets a
+  # predictable value. Defaults to ${device_name} via mqtt_client_id; override per device. Independent
+  # of topic_prefix.
+  client_id: ${mqtt_client_id}
   # Topic prefix and the Home Assistant availability messages, all derived from ${device_name}.
   topic_prefix: ${device_name}
   birth_message:
@@ -75,8 +100,8 @@ mqtt:
     payload: offline
     qos: 0
     retain: true
-  # No MQTT log publishing by default — parity with legacy, which never had a log_topic at all.
-  # ESPHome does NOT treat "omit log_topic" as "off": mqtt/__init__.py validate_config re-injects a
+  # No MQTT log publishing by default: no device streams its logs to the broker unless a consumer
+  # opts in. ESPHome does NOT treat "omit log_topic" as "off": mqtt/__init__.py validate_config re-injects a
   # default `${topic_prefix}/debug` (retain: true) whenever a topic_prefix is set, so simply deleting
   # this key would keep every device streaming its logs to the broker. Disabling requires log_topic to
   # be PRESENT but empty (null): the codegen path (mqtt/__init__.py: `if not log_topic:
@@ -99,7 +124,7 @@ mqtt:
         - delay: 2s
         - lambda: |-
             // esp_ota_mark_app_valid_cancel_rollback is an ESP-IDF API; the Arduino OTA path has no
-            // equivalent rollback marker, so this is a no-op there (matches the legacy guard).
+            // equivalent rollback marker, so this compiles to a no-op there.
             #ifdef USE_ESP_IDF
               if (id(mqtt_client).is_connected()) {
                 id(script_rollback).stop();

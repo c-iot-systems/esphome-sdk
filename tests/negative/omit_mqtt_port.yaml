@@ -1,13 +1,14 @@
-# NEGATIVE — MUST FAIL. Omits mqtt_broker (required by criotive_mqtt.yaml); every other required
-# substitution is present. Proves criotive_mqtt.yaml gives mqtt_broker no default.
+# NEGATIVE — MUST FAIL. Omits mqtt_port (required by criotive_mqtt.yaml); every other required
+# substitution is present. Proves criotive_mqtt.yaml gives mqtt_port no default — a connection port
+# that could be silently wrong must be stated explicitly.
 substitutions:
   device_name: neg-device
   firmware_version: "0.0.0-test"
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
-  # mqtt_broker intentionally omitted
-  mqtt_port: "8883"
+  mqtt_broker: mqtt.test.invalid
+  # mqtt_port intentionally omitted
   mqtt_ca_certificate: test-ca
   mqtt_username: test-mqtt-user
   mqtt_password: test-mqtt-password

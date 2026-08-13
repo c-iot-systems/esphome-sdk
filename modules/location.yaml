@@ -2,7 +2,7 @@
 #
 # Owns: the `google_location` text sensor, its own `external_components` source, and the
 # "Location Request" button that triggers an on-demand scan. Opt-in; imports nothing. google_location
-# is a SHARED capability, available to any device — it is not escape-specific.
+# is a SHARED capability available to any device.
 #
 # ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────
 # ESPHome treats `packages:` and `external_components:` as INDEPENDENT git sources: fetching this
@@ -11,10 +11,8 @@
 # component is fetched at the SAME revision as this YAML. A hard-coded ref here would let the C++
 # silently follow the default branch while the YAML is pinned; check-sdk-ref.sh enforces `${sdk_ref}`.
 #
-# The legacy config loaded google_location from a LOCAL component path (type: local); in the SDK the
-# component lives in this repo under components/google_location and is fetched from git, so the module
-# is self-contained for a remote consumer. The component itself is ported unchanged (it never
-# referenced Azure).
+# The google_location component lives in this repo under components/google_location and is fetched
+# from git (pinned to ${sdk_ref}), so the module is self-contained for a remote consumer.
 
 external_components:
   - source:
@@ -27,16 +25,14 @@ text_sensor:
   - platform: google_location
     name: "Google location"
     id: id_google_location
-    # A PollingComponent; `never` is the infinite update interval the legacy config set via
-    # ${INFINITE_UPDATE_INTERVAL}. Location is refreshed on demand through the button below, not on a
-    # timer.
+    # A PollingComponent; `never` disables the periodic poll — location is refreshed on demand through
+    # the button below, not on a timer.
     update_interval: never
 
 button:
-  # On-demand location refresh — the legacy "Location Request" my_button, rebuilt on the standard
-  # `template` button platform (my_button is deprecated — ADR-0021). It lives with the component it
-  # drives, so importing controls.yaml never pulls in google_location. Explicit list syntax on
-  # on_press (the automation-list-syntax invariant).
+  # On-demand location refresh — a standard `template` button. It lives with the component it drives,
+  # so importing controls.yaml never pulls in google_location. Explicit list syntax on on_press (the
+  # automation-list-syntax invariant).
   - platform: template
     name: "Location Request"
     id: button_google_location
