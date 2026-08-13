@@ -1,27 +1,3 @@
-# tca8418.yaml — TCA8418 I2C GPIO expander (optional hardware module).
-#
-# Declares ONLY the `tca8418` external component. A device imports this module solely to make the
-# TCA8418 driver available; it then instantiates the expander itself (with the concrete I2C address
-# and bus its board wires) and consumes the pins in its own private config. The instance is
-# device-specific — I2C address, which of the 18 pins are used and for what — so it does NOT belong
-# in this shared module, which is why (unlike location.yaml's google_location singleton) no `tca8418:`
-# instance is declared here.
-#
-# `TCA8418Component` extends `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers
-# `TCA8418GPIOPin` as a real `GPIOPin`, so its 18 pins (ROW0-ROW7, COL0-COL9) can be used as a pin
-# source by ANY component — a `binary_sensor: platform: gpio` input, a `switch: platform: gpio`
-# output, and so on. It is a GENERAL capability for any board short on native GPIO, and is unrelated
-# to ESPHome's native matrix_keypad/key_collector (those scan a keypad matrix; this provides pins).
-# The component AUTO_LOADs gpio_expander and DEPENDS on i2c, so
-# a consumer must also declare an `i2c:` bus.
-#
-# ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────
-# ESPHome treats `packages:` and `external_components:` as INDEPENDENT git sources: fetching this
-# module at `@<ref>` does NOT pass that ref to the external_components block below. So the source is
-# pinned to `${sdk_ref}` — the per-file `vars:` the consumer threads to every module — and the C++
-# component is fetched at the SAME revision as this YAML. A hard-coded ref here would let the C++
-# silently follow the default branch while the YAML is pinned; check-sdk-ref.sh enforces `${sdk_ref}`.
-
 external_components:
   - source:
       type: git

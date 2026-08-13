@@ -1,20 +1,5 @@
-# Positive validate fixture for hds_v1_1 with SW1 ENABLED — the flag at its default (true). It imports
-# the v1.1 board and controls.yaml, plus core + wifi + criotive_mqtt + ota, and must pass
-# `esphome config`. This is the oracle for the SW1-present state: hds_v1_1_sw1_enabled defaults to
-# true, so the board wires the on-board button on GPIO1 and its !remove sentinel is a no-op. SW1's
-# on_click presses button_restart / button_factory, which controls.yaml owns, so importing
-# controls.yaml is what makes the button's id references resolve. The serial console stays OFF
-# (logger_baud_rate: 0, the default) because SW1 owns GPIO1 (U0TXD).
-#
-# A device that instead needs serial logs sets hds_v1_1_sw1_enabled: false and a real
-# logger_baud_rate; that path is the sibling hds_v1_1.yaml fixture, which sets the flag false. Together
-# the two fixtures prove both flag states validate.
-#
-# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
-# the package ref and every vars.sdk_ref are the placeholder.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no value
-# here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+# Fixture: hds_v1_1 with SW1 ENABLED (the flag's default). Imports controls.yaml so SW1's on_click
+# id references resolve; the console stays off because SW1 owns GPIO1. Sibling: hds_v1_1.yaml.
 substitutions:
   device_name: hds-v1-1-sw1-testdev
   firmware_version: "0.0.0-test"

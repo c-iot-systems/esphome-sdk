@@ -1,13 +1,5 @@
-# Positive validate fixture for the hds_v2_0 board (ESP32-S3) — imports the hardware module plus
-# core + wifi + criotive_mqtt + ota + diagnostics + controls at the REVISION UNDER TEST, and must
-# pass `esphome config`. One of the three configs release CI compiles for real.
-#
-# The hardware module supplies the esp32: platform block (variant esp32s3), so there is NO inline
-# hardware stub here. CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md);
-# check-sdk-ref.sh asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no
-# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+# Fixture: the hds_v2_0 board (ESP32-S3) with the full module set. One of the three configs release
+# CI compiles for real.
 substitutions:
   device_name: hds-v2-0-testdev
   firmware_version: "0.0.0-test"
