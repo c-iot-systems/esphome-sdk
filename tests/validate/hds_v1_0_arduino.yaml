@@ -5,11 +5,13 @@
 # plain hds_v1_0 / hds_v1_1 / hds_v2_0 fixtures; this one proves the arduino override validates and,
 # on release, compiles.
 #
-# Framework consequence: on arduino the ota.yaml rollback watchdog (#ifdef USE_ESP_IDF) is compiled
-# OUT — there is no ESP-IDF rollback API on that path — so an arduino build carries no post-OTA
-# rollback protection (see the README OTA + framework sections). The enable_ota_rollback pin in the
-# board file is a no-op here (emitted only on the esp-idf toolchain), which is exactly why carrying it
-# in the shared board file is safe.
+# Framework consequence: on arduino the ota.yaml rollback watchdog and the MQTT confirmation are both
+# #ifdef USE_ESP_IDF, so they are compiled OUT — an arduino build carries no post-OTA rollback
+# protection (see the README OTA + framework sections). ESPHome emits enable_ota_rollback's
+# USE_OTA_ROLLBACK on arduino too, so this fixture PAIRS framework_variant: arduino with
+# ota_rollback: false — leaving USE_OTA_ROLLBACK undefined so hal.cpp confirms the image at boot and
+# no rollback machinery (bootloader rollback or deferred confirmation) is compiled in. This fixture is
+# the oracle for that required pairing.
 #
 # CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
 # the package ref and every vars.sdk_ref are the placeholder.
@@ -20,6 +22,7 @@ substitutions:
   device_name: hds-v1-0-arduino-testdev
   firmware_version: "0.0.0-test"
   framework_variant: arduino
+  ota_rollback: "false"  # paired with arduino: keeps USE_OTA_ROLLBACK undefined (rollback is esp-idf-only)
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
