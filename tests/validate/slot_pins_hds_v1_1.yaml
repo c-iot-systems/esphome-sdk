@@ -6,8 +6,9 @@
 # declared. Distinct pins are chosen per module type so no two inputs collide (ESPHome rejects a
 # reused pin). ignore_pin_validation_error is set because some legitimate slot pins are flash/strapping
 # pins on these modules that ESPHome's generic ESP32 check would otherwise reject — it does NOT hide a
-# mistyped name. wifi is imported because core's time.sntp needs a network component. The board wires
-# no on-board SW1 (that is the opt-in hds_v1_1_sw1.yaml, not imported here), so controls.yaml is not
+# mistyped name. wifi is imported because core's time.sntp needs a network component. This fixture
+# sets hds_v1_1_sw1_enabled: false so the board's SW1 is removed — it exercises the slot pin table, not
+# SW1, and with SW1 off nothing presses button_restart / button_factory, so controls.yaml is not
 # needed. The pin VALUES are validated against the board data in the PR, not here — nothing flashes
 # hardware.
 #
@@ -15,6 +16,8 @@
 substitutions:
   device_name: hds-v1-1-slots
   firmware_version: "0.0.0-test"
+  # Remove SW1 so this fixture stays focused on slot pins and needs no controls.yaml import.
+  hds_v1_1_sw1_enabled: false
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password

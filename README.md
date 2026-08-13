@@ -169,10 +169,10 @@ exclusive — a hardware constraint, not a configuration choice.** `UART0`'s TX 
 the same pin `hds_v1_1`'s on-board **SW1** button uses. `UART1`/`UART2`'s default pins are wired to
 flash on typical modules and the logger schema exposes no `tx_pin` override, so there is no way to
 keep both. **Raising `logger_baud_rate` does NOT free GPIO1** — SW1 still owns the pin whenever the
-SW1 `binary_sensor` exists, so the baud rate is *not* the SW1 opt-out. The opt-out is **composition**:
-SW1 lives in the importable `hardware/hds_v1_1_sw1.yaml`, so a device that needs serial logs simply
-**omits that import** and sets a real `logger_baud_rate` (see the [SW1 / GPIO1](#sw1--gpio1--opt-in-because-it-silences-serial-logging)
-section for the two-composition table). `esphome config` cannot catch the pin overlap — it is a
+SW1 `binary_sensor` exists, so the baud rate is *not* the SW1 opt-out. The opt-out is the
+compile-time **`hds_v1_1_sw1_enabled`** flag: set it `false` (unquoted) to drop SW1, and a device that
+needs serial logs also sets a real `logger_baud_rate` (see the [SW1 / GPIO1](#sw1--gpio1--gated-by-a-compile-time-flag)
+section for the full table). `esphome config` cannot catch the pin overlap — it is a
 physical-pin conflict the schema never sees — so it is stated here as a hardware fact. On the
 **ESP32-S3 `hds_v2_0`** there is no conflict: set `logger_hardware_uart: USB_SERIAL_JTAG` with a real
 `logger_baud_rate` and the console uses the built-in USB peripheral, no UART pins.
@@ -357,7 +357,7 @@ esphome-sdk/
   README.md                     # this file — substitution contract, scope, versioning
   modules/                      # shared + optional-hardware modules
   hardware/                     # per-board files: hds_v1_0/1_1/2_0 (framework via ${framework_variant}),
-                                #   the hds_v1_1_sw1 opt-in unit, and each board's slot pin table
+                                #   hds_v1_1's SW1 flag, and each board's slot pin table
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
   tests/negative/               # configs that MUST fail (missing required substitutions)
@@ -456,8 +456,8 @@ exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r
 | `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) | v2.0 (ESP32-S3) |
 
 - `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
-- `hds_v1_1.yaml` — the CAN termination resistor on GPIO12. The on-board SW1 button is **not** wired
-  here; it is the opt-in `hds_v1_1_sw1.yaml` unit (see "SW1 / GPIO1" below).
+- `hds_v1_1.yaml` — the CAN termination resistor on GPIO12, and the on-board SW1 button on GPIO1
+  gated by the compile-time `hds_v1_1_sw1_enabled` flag (default `true`; see "SW1 / GPIO1" below).
 - `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board has no fixed on-board I/O.
 
 **CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
@@ -507,36 +507,53 @@ rollback machinery is compiled at all. Rollback protection therefore lives only 
 The `framework_variant: arduino` validate fixture exercises exactly that pairing, and the default
 (esp-idf) fixtures cover the rollback path; release CI compiles each for real.
 
-#### SW1 / GPIO1 — opt-in, because it silences serial logging
+#### SW1 / GPIO1 — gated by a compile-time flag
 
 The v1.1 board has an on-board push button, **SW1**, on **GPIO1** — which is the ESP32's **U0TXD**
 (primary UART TX). Configuring SW1 as a GPIO input takes GPIO1 away from the UART, so **the serial
 console goes silent** on that board. Raising `logger_baud_rate` does **not** change that — SW1 owns
 GPIO1 for as long as its `binary_sensor` exists, so the baud rate is not the opt-out. Because the
-trade-off must be a deliberate choice, SW1 is **not** wired in the board file; it lives in the
-importable unit **`hardware/hds_v1_1_sw1.yaml`**. A substitution cannot conditionally omit a YAML
-block, so the two-file split is what makes SW1 genuinely optional — and **omitting the import is the
-"comment out"**.
+trade-off must be a deliberate choice, SW1 is wired in the board file behind a single flag,
+**`hds_v1_1_sw1_enabled`** (default `true`), so the board stays **one YAML file** — the product
+requirement is exactly one file per hardware.
 
-Pick **one** composition in the device's own config:
+The flag works through ESPHome's `!remove`: SW1 is declared with a stable `id: sw1_button`, and a
+second `binary_sensor` item carries `id: !remove '${not hds_v1_1_sw1_enabled and "sw1_button"}'`.
+The substitution pass expands substitutions inside a `!remove` value and evaluates the expression, so
+the flag `false` makes the target resolve to `sw1_button` and SW1 (with its `on_click`) is dropped;
+the flag `true` makes it resolve to the string `false`, which matches no id and is a no-op, so SW1
+stays. It is a flag rather than a commented-out block because the SDK is consumed as a **remote git
+package** — a device cannot edit or comment `hds_v1_1.yaml` at all, but it can set a substitution in
+its own config.
 
-| Goal | Import | `logger_baud_rate` |
-|---|---|---|
-| **normal device** | `hds_v1_1.yaml` **and** `hds_v1_1_sw1.yaml` **and** `controls.yaml` | `0` (default — console off) |
-| **reading serial logs** | `hds_v1_1.yaml` **only** (omit the SW1 file) | a real rate, e.g. `115200` |
+Pick **one** in the device's own config:
 
-- In the **normal** row SW1 works and the console is off. `controls.yaml` is required because SW1's
-  `on_click` presses `button_restart` on a short click and `button_factory` on longer holds, both
-  owned by `controls.yaml` by id.
-- In the **reading serial logs** row GPIO1 stays on the UART and the console prints. A device does
-  this by **not importing** `hds_v1_1_sw1.yaml` — a deliberate, visible choice in its own config.
+| Goal | `hds_v1_1_sw1_enabled` | `logger_baud_rate` | `controls.yaml` |
+|---|---|---|---|
+| **normal device** | `true` (default) | `0` (default — console off) | required |
+| **reading serial logs** | `false` (unquoted) | a real rate, e.g. `115200` | not needed |
 
-This composition **replaces editing or commenting out the board file**, which is impossible here: the
-SDK is consumed as a **remote git package**, so a device cannot touch `hds_v1_1.yaml` at all. Do
-**not** work around the conflict by relocating SW1 to a spare pin — a floating input can spuriously
-fire, and SW1's handlers press restart / factory-reset. (On the ESP32-S3 `hds_v2_0` the trade-off
-does not arise — its console can use `USB_SERIAL_JTAG`, which needs no UART pins.) See the "serial
-console" note under [Logging](#logging-is-off-in-production-by-default).
+- In the **normal** row SW1 works and the console is off, because GPIO1 (U0TXD) is taken by the
+  button. `controls.yaml` is required because SW1's `on_click` presses `button_restart` on a short
+  click and `button_factory` on longer holds, both owned by `controls.yaml` by id.
+- In the **reading serial logs** row SW1 is removed, GPIO1 stays on the UART and the console prints.
+  A device sets `hds_v1_1_sw1_enabled: false` **plus** a real `logger_baud_rate`.
+
+Two footguns to know:
+
+- **Set the flag as an unquoted boolean.** The string `"false"` is **truthy** in the expression
+  (`not "false"` is false), so `hds_v1_1_sw1_enabled: "false"` leaves SW1 **enabled**. Write
+  `hds_v1_1_sw1_enabled: false`.
+- **A mistyped flag name (or id) is a silent no-op** — the `!remove` matches nothing and SW1 stays
+  enabled, with no error. Check the generated config if you expected the console back and it is still
+  silent.
+
+It is a **compile-time** choice: switching sides changes which firmware is built, so it needs a
+**rebuild**, not live pin multiplexing. Do **not** work around the conflict by relocating SW1 to a
+spare pin — a floating input can spuriously fire, and SW1's handlers press restart / factory-reset.
+(On the ESP32-S3 `hds_v2_0` the trade-off does not arise — its console can use `USB_SERIAL_JTAG`,
+which needs no UART pins.) See the "serial console" note under
+[Logging](#logging-is-off-in-production-by-default).
 
 #### Slot pin tables — `slot_<n>_<module>_<signal>`
 

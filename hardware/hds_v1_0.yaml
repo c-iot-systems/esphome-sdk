@@ -29,8 +29,8 @@
 # So the same classic-ESP32 hardware constraint applies: a GPIO1 button and a serial console are
 # mutually exclusive AT THE HARDWARE LEVEL — both need GPIO1 (U0TXD) and there is no way to keep both.
 # This is a hardware fact, not a configuration choice, and raising logger_baud_rate does NOT free
-# GPIO1. On hds_v1_1 the on-board SW1 button hits exactly this, and the way out is COMPOSITION: SW1
-# lives in the importable hds_v1_1_sw1.yaml, so a device omits that import to read serial logs (see
+# GPIO1. On hds_v1_1 the on-board SW1 button hits exactly this, and the way out is the compile-time
+# hds_v1_1_sw1_enabled flag: set it false to drop SW1 and free GPIO1 for a serial console (see
 # hardware/hds_v1_1.yaml, modules/core.yaml and the README). This v1.0 board wires NO on-board button
 # of its own, so GPIO1 is free out of the box and its serial console is unconflicted — a device just
 # sets a non-zero logger_baud_rate and imports no GPIO1 sensor.

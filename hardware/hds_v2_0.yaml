@@ -18,9 +18,9 @@
 # UART pins — so no board GPIO is taken. logger_level and logger_baud_rate stay independent (level
 # gates record production, baud_rate gates console init); see modules/core.yaml.
 #
-# On the classic boards a GPIO1 button and the console cannot coexist, so hds_v1_1 keeps its SW1 in an
-# importable file and a device omits that import to read logs (the two-file composition; see
-# hardware/hds_v1_1.yaml and the README). The S3 needs no such split: because USB_SERIAL_JTAG frees
+# On the classic boards a GPIO1 button and the console cannot coexist, so hds_v1_1 gates its SW1 on
+# the compile-time hds_v1_1_sw1_enabled flag and a device sets it false to read logs (see
+# hardware/hds_v1_1.yaml and the README). The S3 needs no such gate: because USB_SERIAL_JTAG frees
 # GPIO1 entirely, a GPIO1 button could keep its pin WHILE the console is on. (This board declares no
 # on-board button, so the point is only that the trade-off simply does not arise on the S3.)
 #

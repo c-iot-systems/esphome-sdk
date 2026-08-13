@@ -12,30 +12,49 @@
 # Fixed pin map:
 #   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
 #
-# ── SW1 is opt-in, and is NOT wired here ──────────────────────────────────────────────────────
+# ── SW1 is wired here, gated by a compile-time flag ───────────────────────────────────────────
 # This board has an on-board push button (SW1) on GPIO1. GPIO1 is the ESP32's U0TXD line, so
 # configuring SW1 as a GPIO input takes over the primary UART's TX pin and silences serial-console
-# logging on the board. Raising logger_baud_rate does NOT free GPIO1 — SW1 still owns the pin — so
-# gating the console on the baud rate cannot make the two coexist here. That trade-off must be a
-# deliberate per-device choice, so SW1 is NOT wired in this board file; it lives in the importable
-# unit hds_v1_1_sw1.yaml. A substitution cannot conditionally omit a YAML block, so the split into a
-# second file is the only mechanism that makes the button genuinely optional — omitting that import
-# IS the "comment out".
+# logging on the board. Raising logger_baud_rate does NOT free GPIO1 — SW1 still owns the pin
+# whenever the SW1 binary_sensor exists — so the baud rate is NOT the SW1 opt-out. That trade-off is
+# a deliberate per-device choice, expressed by ONE flag so this board stays a single YAML file.
 #
-# ── The two compositions — pick ONE in the device's own config ─────────────────────────────────
-#   | Goal                | Import in the device config                       | logger_baud_rate  |
-#   |---------------------|---------------------------------------------------|-------------------|
-#   | normal device       | hds_v1_1.yaml + hds_v1_1_sw1.yaml + controls.yaml | 0 (default)       |
-#   | reading serial logs | hds_v1_1.yaml ONLY (omit the SW1 file)            | real, e.g. 115200 |
+# ── The hds_v1_1_sw1_enabled flag (default true) ──────────────────────────────────────────────
+# SW1 is declared unconditionally below with a stable id (sw1_button), and a second binary_sensor
+# item carries `id: !remove '${not hds_v1_1_sw1_enabled and "sw1_button"}'`. The substitution pass
+# expands substitutions INSIDE a !remove value and the expression is evaluated by Jinja:
+#   - flag true  -> `not true and "sw1_button"` -> false  -> !remove target is the string "false",
+#                   which matches no id, so the removal is a no-op and SW1 stays wired.
+#   - flag false -> `not false and "sw1_button"` -> "sw1_button" -> !remove drops the sw1_button
+#                   item (and its on_click), so GPIO1 is genuinely unclaimed and the serial console
+#                   is free.
+# A target that does not match any id is a SILENT NO-OP (config.py resolve_extend_remove pops the id
+# with index.pop(item_id, None)). Two consequences the consumer MUST know:
+#   - The flag must be an UNQUOTED boolean. The string "false" is TRUTHY in the expression
+#     (`not "false"` is false), so hds_v1_1_sw1_enabled: "false" leaves SW1 ENABLED. Write
+#     `hds_v1_1_sw1_enabled: false`, not `"false"`.
+#   - A mistyped flag name or a typo in sw1_button likewise matches nothing and is a silent no-op —
+#     SW1 stays enabled. There is no error; verify the generated config if in doubt.
+#
+# ── Pick ONE per device, at BUILD time (it is not live-multiplexable) ─────────────────────────
+#   | Goal                | hds_v1_1_sw1_enabled | logger_baud_rate  | controls.yaml |
+#   |---------------------|----------------------|-------------------|---------------|
+#   | normal device       | true (default)       | 0 (default)       | required      |
+#   | reading serial logs | false                | real, e.g. 115200 | not needed    |
+#
+# Switching sides is a COMPILE-TIME choice: it changes what firmware is built, so it requires a
+# rebuild, not live pin multiplexing. In the default (true) row SW1 works and GPIO1 (U0TXD) is
+# therefore unavailable for the serial console; controls.yaml is required because SW1's on_click
+# presses button_restart / button_factory by id. To use the serial console set
+# hds_v1_1_sw1_enabled: false (unquoted) AND a real logger_baud_rate.
 #
 # The SDK ships as a REMOTE git package, so a device CANNOT edit or comment out this board file to
-# free GPIO1. Not-importing hds_v1_1_sw1.yaml is the deliberate, visible replacement for commenting
-# SW1 out — a choice made in the device's OWN config, editing no SDK file. controls.yaml is required
-# only in the normal-device row (SW1's on_click presses button_restart / button_factory by id).
-# Do NOT relocate SW1 to a spare pin via a substitution — a floating input can spuriously fire, and
-# SW1's handlers press restart / factory-reset. (On the ESP32-S3 hds_v2_0 board the choice does not
-# arise — its console can use USB_SERIAL_JTAG, which needs no UART pins; see modules/core.yaml and
-# the README's "SW1 / GPIO1" note.)
+# free GPIO1 — which is exactly why SW1 is a flag rather than a commented-out block: the flag is set
+# in the device's OWN config, editing no SDK file. Do NOT relocate SW1 to a spare pin via a
+# substitution — a floating input can spuriously fire, and SW1's handlers press restart /
+# factory-reset. (On the ESP32-S3 hds_v2_0 board the choice does not arise — its console can use
+# USB_SERIAL_JTAG, which needs no UART pins; see modules/core.yaml and the README's "SW1 / GPIO1"
+# note.)
 #
 # can_resistor_status selects the CAN termination restore mode. Only the two endpoint nodes of a CAN
 # segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
@@ -52,6 +71,10 @@
 # really holds is the consumer's responsibility (see the README).
 substitutions:
   can_resistor_status: ALWAYS_ON
+  # On-board SW1 button (GPIO1) — see the header. Default true: SW1 is wired and GPIO1/U0TXD is taken,
+  # so the serial console is unavailable. Set to false (UNQUOTED — "false" is truthy and would leave
+  # SW1 on) to drop SW1 and free GPIO1 for a serial console. Compile-time; changing it needs a rebuild.
+  hds_v1_1_sw1_enabled: true
   slot_1_triple_digital_input_in1: "23"
   slot_1_triple_digital_input_in2: "16"
   slot_1_triple_digital_input_in3: "4"
@@ -236,3 +259,41 @@ switch:
     name: "CAN Resistor"
     internal: true
     restore_mode: ${can_resistor_status}
+
+binary_sensor:
+  # On-board SW1 button on GPIO1 (U0TXD). Declared unconditionally with a stable id; the !remove item
+  # below drops it when hds_v1_1_sw1_enabled is false (see the header). on_click uses the explicit
+  # list form (three separate click-length windows, each its own automation) so package merging keeps
+  # all three rather than collapsing them into one — see the automation-list-syntax gate. SW1's
+  # handlers press button_restart / button_factory (owned by controls.yaml, by id), so a device that
+  # keeps SW1 enabled MUST also import controls.yaml or the id references do not resolve.
+  - platform: gpio
+    id: sw1_button
+    pin: 1
+    name: "SW1"
+    internal: true
+    filters:
+      - invert
+    on_click:
+      - min_length: 100ms
+        max_length: 2s
+        then:
+          - logger.log: "Rebooting"
+          - delay: 1s
+          - button.press: button_restart
+      - min_length: 2s
+        max_length: 10s
+        then:
+          - logger.log: "WiFi Manager"
+          - delay: 1s
+          - button.press: button_factory  # TODO: start captive instead.
+      - min_length: 20s
+        max_length: 1000s
+        then:
+          - logger.log: "Factory"
+          - delay: 1s
+          - button.press: button_factory
+  # Compile-time SW1 opt-out. Resolves to `!remove sw1_button` when hds_v1_1_sw1_enabled is false
+  # (dropping SW1 above and freeing GPIO1); when true it resolves to the string "false", which matches
+  # no id, so the removal is a silent no-op and SW1 stays. The flag MUST be an unquoted boolean.
+  - id: !remove '${not hds_v1_1_sw1_enabled and "sw1_button"}'
