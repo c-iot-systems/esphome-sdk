@@ -1,20 +1,8 @@
-# Positive validate fixture — core.yaml + wifi.yaml with NO station slot filled. This is the
-# provisioning-only device: `networks:` resolves to an empty list, the fallback AP stays up and the
-# captive portal is how WiFi credentials reach the device in the field.
-#
-# The fixture exists to keep that mode a supported, tested configuration rather than an accident of
-# optional substitutions. It also pins the behaviour described in the README: with no station
-# configured, has_sta() is false at boot, so ESPHome keys the captive portal's saved credentials on
-# the constant 88491487UL instead of the config-version hash, and they survive OTA releases.
-#
-# Note what is NOT omitted: wifi_ap_password is still required — with no station credentials, the
-# fallback AP is the only way into the device, so it must never be defaultable.
 substitutions:
   device_name: core-wifi-provisioning-testdev
   firmware_version: "0.0.0-test"
   wifi_ap_password: test-ap-password
 
-# Inline hardware stub — SDK-2 owns no hardware module, so the fixture supplies the platform itself.
 esp32:
   board: esp32dev
   framework:

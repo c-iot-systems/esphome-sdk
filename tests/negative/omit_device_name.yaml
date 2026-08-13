@@ -1,7 +1,4 @@
-# NEGATIVE — MUST FAIL. Omits device_name (required by core.yaml); every other required
-# substitution is present. Proves core.yaml gives device_name no default.
 substitutions:
-  # device_name intentionally omitted
   firmware_version: "0.0.0-test"
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password

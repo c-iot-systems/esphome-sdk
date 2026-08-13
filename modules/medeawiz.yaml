@@ -1,24 +1,3 @@
-# medeawiz.yaml — MedeaWiz Sprite 4K serial video-player driver (optional hardware module).
-#
-# Declares ONLY the `medeawiz` external component. A device imports this module to make the driver
-# available; it then instantiates `medeawiz:` on the concrete `uart:` its board wires (the Sprite
-# is controlled over a 3.5mm 4-pole TTL serial port) and drives playback from its own private logic.
-# The instance is device-specific — which UART, baud rate, optional multi-drop address, and the
-# on_file / on_end_of_file automations a given device needs — so no `medeawiz:` instance is declared
-# in this shared module. The component DEPENDS on uart, so a consumer must also declare a `uart:`
-# bus with a tx pin (the Sprite receives commands on tx).
-#
-# There is no ESPHome-native equivalent: the Sprite speaks a bespoke single-byte serial protocol
-# (play file N, seek, volume, request position/duration, end-of-file feedback), so the driver is a
-# genuine capability rather than a re-wrapping of a stock component.
-#
-# ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────
-# ESPHome treats `packages:` and `external_components:` as INDEPENDENT git sources: fetching this
-# module at `@<ref>` does NOT pass that ref to the external_components block below. So the source is
-# pinned to `${sdk_ref}` — the per-file `vars:` the consumer threads to every module — and the C++
-# component is fetched at the SAME revision as this YAML. A hard-coded ref here would let the C++
-# silently follow the default branch while the YAML is pinned; check-sdk-ref.sh enforces `${sdk_ref}`.
-
 external_components:
   - source:
       type: git

@@ -1,10 +1,6 @@
 name: validate
 
-# Validate on every pull request. This checks the REVISION UNDER TEST, never a published tag:
-# each validate fixture carries the literal placeholder __SDK_REF__ and CI materializes the PR
-# head SHA into both the package `ref` and every `vars.sdk_ref`, so `esphome config` resolves the
-# branch's own code from GitHub rather than the last release.
-
+# PR fixtures resolve against the head SHA, not a published tag.
 on:
   pull_request:
 
@@ -13,7 +9,6 @@ permissions:
 
 env:
   ESPHOME_VERSION: "2026.5.1"
-  # The head commit of the PR branch — pushed to origin, so ESPHome can fetch packages at it.
   SDK_REF: ${{ github.event.pull_request.head.sha }}
 
 jobs:
@@ -58,9 +53,7 @@ jobs:
           for f in "${files[@]}"; do
             sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
           done
-          # Guard: no placeholder may survive, and every resolved ref must be exactly the SHA.
-          # Scan only the YAML fixtures — tests/validate/README.md intentionally documents the
-          # literal __SDK_REF__ placeholder and must not be treated as a fixture.
+          # Scan fixtures only; README intentionally documents the placeholder.
           if grep -l '__SDK_REF__' "${files[@]}" ; then
             echo "::error::A fixture still contains __SDK_REF__ after materialization"
             exit 1

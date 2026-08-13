@@ -1,30 +1,7 @@
-# Positive validate fixture for the hds_v1_1 board with SW1 DISABLED — hds_v1_1_sw1_enabled: false,
-# the serial console turned ON. It imports the hardware module plus core + wifi + criotive_mqtt + ota
-# + diagnostics at the REVISION UNDER TEST, and must pass `esphome config`. One of the three configs
-# release CI compiles for real.
-#
-# This is the oracle for the SW1-removed state: setting hds_v1_1_sw1_enabled: false makes the board's
-# !remove sentinel drop sw1_button, so GPIO1 (U0TXD) stays on the UART and a serial console is
-# available — this fixture sets a real, non-zero logger_baud_rate on the classic ESP32 to prove serial
-# logs are reachable on hds_v1_1 WITHOUT editing any SDK file (the flag is the whole mechanism).
-# controls.yaml is NOT imported here: with SW1 removed nothing presses button_restart / button_factory,
-# so the board validates without it — proving the board is standalone-valid with SW1 off. The
-# SW1-enabled state is the sibling hds_v1_1_sw1.yaml fixture.
-#
-# The hardware module supplies the esp32: platform block, so there is NO inline hardware stub here.
-# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh
-# asserts the package `ref` and every `vars.sdk_ref` are the placeholder.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no
-# value here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
 substitutions:
   device_name: hds-v1-1-testdev
   firmware_version: "0.0.0-test"
-  # Override the hardware default (ALWAYS_ON) so the two v1 fixtures exercise both CAN termination
-  # modes: this board sits mid-bus and must NOT terminate.
   can_resistor_status: ALWAYS_OFF
-  # SW1 disabled (UNQUOTED false — "false" is truthy and would leave SW1 on): drops sw1_button, so
-  # GPIO1 is free for UART0 — turn the console ON.
   hds_v1_1_sw1_enabled: false
   logger_level: INFO
   logger_baud_rate: "115200"

@@ -1,6 +1,3 @@
-# NEGATIVE — MUST FAIL. Omits ota_http_server (required by ota.yaml); every other required
-# substitution is present. Proves ota.yaml gives ota_http_server no default — the optional
-# ota_http_server_test defaults to it, so omitting the required host must still fail loudly.
 substitutions:
   device_name: neg-device
   firmware_version: "0.0.0-test"
@@ -13,7 +10,6 @@ substitutions:
   mqtt_username: test-mqtt-user
   mqtt_password: test-mqtt-password
   ota_password: test-ota-password
-  # ota_http_server intentionally omitted
 
 esp32:
   board: esp32dev
