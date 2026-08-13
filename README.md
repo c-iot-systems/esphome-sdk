@@ -234,6 +234,19 @@ The watchdog is therefore gated on `ESP_OTA_IMG_PENDING_VERIFY` (ESP-IDF's own i
 `esp_ota_begin`): only a freshly-flashed, not-yet-verified image can roll back; a confirmed,
 long-offline image is never touched. OTA safety is preserved and offline survival is guaranteed.
 
+That gate only holds if **nothing confirms the image before the broker does**. ESPHome's `safe_mode`
+auto-confirms the running image on a timer — `esp_ota_mark_app_valid_cancel_rollback()` after
+`boot_is_good_after`, whose stock default is `1min` — and on esp-idf (where OTA rollback is enabled by
+default) that is the only early confirmer. At the stock 1 minute the image would already be
+`ESP_OTA_IMG_VALID` four minutes before the 300s watchdog fires, so its `PENDING_VERIFY` gate could
+never trigger and a genuinely bad OTA would silently survive. `ota.yaml` therefore sets
+`safe_mode: boot_is_good_after: 330s` — past the watchdog — so the **broker**, not a boot timer, owns
+validity confirmation for the whole window. The trade-off: on esp-idf a freshly-flashed image stays
+subject to bootloader rollback-on-reboot until it either reaches the broker or survives 330s, slightly
+longer than ESPHome's default; a device that has already confirmed once is unaffected. The
+`check-rollback-timing.sh` gate fails the build if `boot_is_good_after` ever drops to or below the
+watchdog delay, so this ordering can never silently regress.
+
 ## `${sdk_ref}` — pinning the components with the YAML
 
 ESPHome treats `packages:` and `external_components:` as **independent** git sources: a module

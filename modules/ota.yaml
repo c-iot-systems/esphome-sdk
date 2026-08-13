@@ -42,6 +42,13 @@
 # OTA that never reaches the broker still rolls back) while a healthy device survives indefinite
 # offline operation.
 #
+# The PENDING_VERIFY gate only holds if nothing ELSE confirms the image before the broker does.
+# ESPHome's safe_mode auto-confirms on a timer (esp_ota_mark_app_valid_cancel_rollback after
+# `boot_is_good_after`, stock default 1min); on esp-idf that is the sole early confirmer. So the
+# safe_mode block below raises `boot_is_good_after` to 330s — past this 300s watchdog — so the broker,
+# not a boot timer, decides validity. check-rollback-timing.sh enforces boot_is_good_after > the delay
+# below; without that ordering this gate would be permanently VALID by 300s and never fire.
+#
 # ── Test/prod OTA host selection ──────────────────────────────────────────────────────────────
 # A build can be routed to one of two download hosts — a production host and a separate test/staging
 # host — by detecting a `.test` token in the requested version name. `.test` is NOT necessarily the
@@ -73,6 +80,22 @@ substitutions:
 
 safe_mode:
   num_attempts: ${ota_attempts}
+  # MQTT — not a boot timer — must own OTA validity confirmation for the WHOLE 300s rollback-watchdog
+  # window (script_rollback, below). ESPHome's safe_mode marks the running image ESP_OTA_IMG_VALID via
+  # esp_ota_mark_app_valid_cancel_rollback() once it judges the boot "good", after `boot_is_good_after`.
+  # On esp-idf, OTA rollback is enabled by default (esp32 advanced enable_ota_rollback defaults true ->
+  # USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE), and in that mode safe_mode is the ONLY
+  # early confirmer — esp32/hal.cpp deliberately defers its own boot-time mark-valid to safe_mode when
+  # USE_OTA_ROLLBACK is set. At the stock `boot_is_good_after: 1min` the image is already VALID a full
+  # four minutes before script_rollback fires at 300s, so the watchdog's ESP_OTA_IMG_PENDING_VERIFY
+  # gate is always false and a genuinely bad OTA (boots fine, never reaches the broker) is NEVER rolled
+  # back — the watchdog would be dead code. Setting confirmation to 330s (> the 300s watchdog) hands the
+  # decision to the broker: reach it and criotive_mqtt's on_connect confirms the image and cancels the
+  # timer; fail to, and at 300s the image is still PENDING_VERIFY and the watchdog rolls it back. A
+  # previously-confirmed (VALID) image that is merely long-offline is untouched under either timing —
+  # the gate only ever acts on a not-yet-verified image. check-rollback-timing.sh fails the build if
+  # this value ever drops to or below the watchdog delay, so the dead-watchdog regression cannot return.
+  boot_is_good_after: 330s
 
 esphome:
   on_boot:
@@ -171,6 +194,10 @@ script:
 
   - id: script_rollback
     then:
+      # 300s window for the broker to prove the freshly-flashed image works. Kept STRICTLY below
+      # safe_mode's boot_is_good_after (330s) on purpose: if safe_mode confirmed the image first, it
+      # would move the running partition out of ESP_OTA_IMG_PENDING_VERIFY and this gate would never
+      # fire (see the safe_mode block above). check-rollback-timing.sh enforces that ordering.
       - delay: 300s
       - lambda: |-
           #ifdef USE_ESP_IDF
