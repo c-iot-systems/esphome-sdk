@@ -1,26 +1,190 @@
 # hds_v1_0 — concrete board definition + pin map for the v1.0 board.
 #
-# A hardware file owns the platform component (esp32:) and the board-specific I/O. Board, variant
-# and framework are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+# A hardware file owns the platform component (esp32:) and the board-specific I/O. Board and variant
+# are CONCRETE here — never ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. The build FRAMEWORK is the
+# one esp32 field that varies per device, so it is consumed as ${framework_variant} (default esp-idf,
+# declared in modules/core.yaml) inside this file's own esp32.framework — one board file now serves
+# both the esp-idf and arduino builds instead of a doubled _idf sibling. A device selects the
+# arduino toolchain with framework_variant: arduino.
 #
 # This board has no indicator LEDs, so it ships no OTA visual feedback. The rule still holds: a
 # hardware file WITH LEDs would drive its own OTA feedback by its own ids, and no module reaches
 # into a hardware id.
 #
-# Pin map:
+# Fixed pin map:
 #   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
 #
 # can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
 # segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
 # Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+#
+# ── Serial console / logger ───────────────────────────────────────────────────────────────────
+# The serial console is OFF by default: modules/core.yaml sets logger_baud_rate: 0, which skips UART
+# init entirely, so this board ships silent on the wire. Raising serial logs needs BOTH a non-NONE
+# logger_level AND a non-zero logger_baud_rate — the two are independent (level gates record
+# production, baud_rate gates UART init). On this classic-ESP32 board the console lands on UART0,
+# whose TX is GPIO1 (U0TXD); UART1/UART2's default pins are wired to flash on typical modules and the
+# logger schema exposes no tx_pin override.
+#
+# So the same classic-ESP32 hardware constraint applies: a GPIO1 button and a serial console are
+# mutually exclusive AT THE HARDWARE LEVEL — both need GPIO1 (U0TXD) and there is no way to keep both.
+# This is a hardware fact, not a configuration choice, and raising logger_baud_rate does NOT free
+# GPIO1. On hds_v1_1 the on-board SW1 button hits exactly this, and the way out is the compile-time
+# hds_v1_1_sw1_enabled flag: set it false to drop SW1 and free GPIO1 for a serial console (see
+# hardware/hds_v1_1.yaml, modules/core.yaml and the README). This v1.0 board wires NO on-board button
+# of its own, so GPIO1 is free out of the box and its serial console is unconflicted — a device just
+# sets a non-zero logger_baud_rate and imports no GPIO1 sensor.
+#
+# ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
+# This board carries seven module slots. Each substitution below resolves ONE module signal, for a
+# given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that
+# wires, say, a Double Relay into slot 3 references ${slot_3_double_relay_relay_1} as that relay's
+# pin. The values are static: they were read directly from the board's slot/module data (the physical
+# per-slot GPIO table and each module's signal-to-lane mapping) and only combinations that physically
+# fit the board are listed. The SDK CANNOT check that a slot actually holds the module a name refers
+# to — it never sees a device's populated slot map — so choosing the right name for the module a slot
+# really holds is the consumer's responsibility (see the README).
 substitutions:
   can_resistor_status: ALWAYS_ON
+  slot_1_triple_digital_input_in1: "7"
+  slot_1_triple_digital_input_in2: "8"
+  slot_1_triple_digital_input_in3: "37"
+  slot_1_level_shifter_io1: "7"
+  slot_1_level_shifter_io2: "8"
+  slot_1_level_shifter_in3: "37"
+  slot_1_double_relay_relay_1: "8"
+  slot_1_double_relay_relay_2: "7"
+  slot_1_audio_tx_dat: "13"
+  slot_1_audio_ctrl: "14"
+  slot_1_audio_rx: "35"
+  slot_1_audio_clk: "8"
+  slot_1_audio_cmd: "7"
+  slot_1_audio_busy: "37"
+  slot_1_io_expander_keyscan_5x5_sda: "13"
+  slot_1_io_expander_keyscan_5x5_scl: "14"
+  slot_1_io_expander_keyscan_5x5_int: "35"
+  slot_1_h_bridge_out_1: "8"
+  slot_1_h_bridge_out_2: "7"
+  slot_2_triple_digital_input_in1: "14"
+  slot_2_triple_digital_input_in2: "13"
+  slot_2_triple_digital_input_in3: "35"
+  slot_2_level_shifter_io1: "14"
+  slot_2_level_shifter_io2: "13"
+  slot_2_level_shifter_in3: "35"
+  slot_2_double_relay_relay_1: "13"
+  slot_2_double_relay_relay_2: "14"
+  slot_2_audio_tx_dat: "25"
+  slot_2_audio_ctrl: "33"
+  slot_2_audio_rx: "34"
+  slot_2_audio_clk: "13"
+  slot_2_audio_cmd: "14"
+  slot_2_audio_busy: "35"
+  slot_2_io_expander_keyscan_5x5_sda: "25"
+  slot_2_io_expander_keyscan_5x5_scl: "33"
+  slot_2_io_expander_keyscan_5x5_int: "34"
+  slot_2_h_bridge_out_1: "13"
+  slot_2_h_bridge_out_2: "14"
+  slot_3_triple_digital_input_in1: "33"
+  slot_3_triple_digital_input_in2: "25"
+  slot_3_triple_digital_input_in3: "34"
+  slot_3_level_shifter_io1: "33"
+  slot_3_level_shifter_io2: "25"
+  slot_3_level_shifter_in3: "34"
+  slot_3_double_relay_relay_1: "25"
+  slot_3_double_relay_relay_2: "33"
+  slot_3_h_bridge_out_1: "25"
+  slot_3_h_bridge_out_2: "33"
+  slot_4_triple_digital_input_in1: "27"
+  slot_4_triple_digital_input_in2: "26"
+  slot_4_triple_digital_input_in3: "39"
+  slot_4_level_shifter_io1: "27"
+  slot_4_level_shifter_io2: "26"
+  slot_4_level_shifter_in3: "39"
+  slot_4_double_relay_relay_1: "26"
+  slot_4_double_relay_relay_2: "27"
+  slot_4_audio_tx_dat: "4"
+  slot_4_audio_ctrl: "20"
+  slot_4_audio_rx: "32"
+  slot_4_audio_clk: "26"
+  slot_4_audio_cmd: "27"
+  slot_4_audio_busy: "39"
+  slot_4_io_expander_keyscan_5x5_sda: "4"
+  slot_4_io_expander_keyscan_5x5_scl: "20"
+  slot_4_io_expander_keyscan_5x5_int: "32"
+  slot_4_io_expander_keyscan_10x8_sda: "5"
+  slot_4_io_expander_keyscan_10x8_scl: "19"
+  slot_4_io_expander_keyscan_10x8_int: "38"
+  slot_4_h_bridge_out_1: "26"
+  slot_4_h_bridge_out_2: "27"
+  slot_5_triple_digital_input_in1: "20"
+  slot_5_triple_digital_input_in2: "4"
+  slot_5_triple_digital_input_in3: "32"
+  slot_5_level_shifter_io1: "20"
+  slot_5_level_shifter_io2: "4"
+  slot_5_level_shifter_in3: "32"
+  slot_5_double_relay_relay_1: "4"
+  slot_5_double_relay_relay_2: "20"
+  slot_5_audio_tx_dat: "5"
+  slot_5_audio_ctrl: "19"
+  slot_5_audio_rx: "38"
+  slot_5_audio_clk: "4"
+  slot_5_audio_cmd: "20"
+  slot_5_audio_busy: "32"
+  slot_5_io_expander_keyscan_5x5_sda: "5"
+  slot_5_io_expander_keyscan_5x5_scl: "19"
+  slot_5_io_expander_keyscan_5x5_int: "38"
+  slot_5_h_bridge_out_1: "4"
+  slot_5_h_bridge_out_2: "20"
+  slot_6_triple_digital_input_in1: "19"
+  slot_6_triple_digital_input_in2: "5"
+  slot_6_triple_digital_input_in3: "38"
+  slot_6_level_shifter_io1: "19"
+  slot_6_level_shifter_io2: "5"
+  slot_6_level_shifter_in3: "38"
+  slot_6_double_relay_relay_1: "5"
+  slot_6_double_relay_relay_2: "19"
+  slot_6_audio_tx_dat: "22"
+  slot_6_audio_ctrl: "21"
+  slot_6_audio_rx: "36"
+  slot_6_audio_clk: "5"
+  slot_6_audio_cmd: "19"
+  slot_6_audio_busy: "38"
+  slot_6_io_expander_keyscan_5x5_sda: "22"
+  slot_6_io_expander_keyscan_5x5_scl: "21"
+  slot_6_io_expander_keyscan_5x5_int: "36"
+  slot_6_h_bridge_out_1: "5"
+  slot_6_h_bridge_out_2: "19"
+  slot_7_triple_digital_input_in1: "21"
+  slot_7_triple_digital_input_in2: "22"
+  slot_7_triple_digital_input_in3: "36"
+  slot_7_level_shifter_io1: "21"
+  slot_7_level_shifter_io2: "22"
+  slot_7_level_shifter_in3: "36"
+  slot_7_double_relay_relay_1: "22"
+  slot_7_double_relay_relay_2: "21"
+  slot_7_h_bridge_out_1: "22"
+  slot_7_h_bridge_out_2: "21"
 
 esp32:
   board: pico32
   variant: esp32
   framework:
-    type: arduino
+    # Board and variant are concrete; only the framework varies per device. Default esp-idf (see
+    # modules/core.yaml); override framework_variant: arduino to build against arduino. Substitution
+    # is textual and runs BEFORE schema validation, so ${framework_variant} resolves to a literal
+    # framework name the esp32 schema then checks — the same pattern can_resistor_status already uses.
+    type: ${framework_variant}
+    advanced:
+      # OTA rollback support, driven by ${ota_rollback} (default true; see modules/core.yaml). On
+      # esp-idf this defines USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, which defers
+      # the boot-time image confirmation to safe_mode — esp32/hal.cpp guards its immediate
+      # esp_ota_mark_app_valid_cancel_rollback() with #ifndef USE_OTA_ROLLBACK — the deferral
+      # ota.yaml's rollback watchdog depends on. ESPHome emits this on BOTH frameworks (not just
+      # esp-idf), but the SDK's watchdog and MQTT confirmation are #ifdef USE_ESP_IDF, so an arduino
+      # device MUST pair framework_variant: arduino with ota_rollback: false — otherwise confirmation
+      # is deferred with no watchdog and no broker cancel and a healthy fresh image could roll back.
+      # With ota_rollback: false, USE_OTA_ROLLBACK is undefined and rollback exists only on esp-idf.
+      enable_ota_rollback: ${ota_rollback}
 
 switch:
   - platform: gpio

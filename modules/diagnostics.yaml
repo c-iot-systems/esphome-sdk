@@ -1,13 +1,12 @@
 # diagnostics.yaml — device diagnostics: the debug platform, device info and reset reason.
 #
-# Owns: the `debug:` component and the two `debug`-platform text sensors the legacy base.yaml
-# exposed — "Device Info" and "Reset Reason". Opt-in: a device imports this module only if it wants
-# these diagnostics. It has no substitution inputs of its own and imports nothing.
+# Owns: the `debug:` component and two `debug`-platform text sensors — "Device Info" and "Reset
+# Reason". Opt-in: a device imports this module only if it wants these diagnostics. It has no
+# substitution inputs of its own and imports nothing.
 #
 # The `debug` platform text sensors REQUIRE the `debug:` component to be present, so this module
-# ships both together. The legacy base.yaml also carried a commented-out `debug`-platform `free`
-# sensor and an `uptime` sensor; neither was active, so neither is ported (no dead config in the
-# SDK).
+# ships both together. It ships only the two active sensors — no inactive/commented-out entities (no
+# dead config in the SDK).
 
 debug:
   update_interval: 0s

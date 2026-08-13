@@ -1,0 +1,54 @@
+# Positive validate fixture for the hds_v1_0 board built on the ARDUINO framework — the non-default
+# framework. It imports the same single hds_v1_0 board file as tests/validate/hds_v1_0.yaml but
+# overrides framework_variant: arduino, so this is the fixture that EXERCISES the ${framework_variant}
+# substitution rather than merely declaring its default. The default (esp-idf) path is covered by the
+# plain hds_v1_0 / hds_v1_1 / hds_v2_0 fixtures; this one proves the arduino override validates and,
+# on release, compiles.
+#
+# Framework consequence: on arduino the ota.yaml rollback watchdog and the MQTT confirmation are both
+# #ifdef USE_ESP_IDF, so they are compiled OUT — an arduino build carries no post-OTA rollback
+# protection (see the README OTA + framework sections). ESPHome emits enable_ota_rollback's
+# USE_OTA_ROLLBACK on arduino too, so this fixture PAIRS framework_variant: arduino with
+# ota_rollback: false — leaving USE_OTA_ROLLBACK undefined so hal.cpp confirms the image at boot and
+# no rollback machinery (bootloader rollback or deferred confirmation) is compiled in. This fixture is
+# the oracle for that required pairing.
+#
+# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
+# the package ref and every vars.sdk_ref are the placeholder.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no value
+# here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: hds-v1-0-arduino-testdev
+  firmware_version: "0.0.0-test"
+  framework_variant: arduino
+  ota_rollback: "false"  # paired with arduino: keeps USE_OTA_ROLLBACK undefined (rollback is esp-idf-only)
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_port: "8883"
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_0.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/diagnostics.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
+        vars: {sdk_ref: __SDK_REF__}
