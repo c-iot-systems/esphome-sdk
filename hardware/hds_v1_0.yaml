@@ -26,11 +26,14 @@
 # whose TX is GPIO1 (U0TXD); UART1/UART2's default pins are wired to flash on typical modules and the
 # logger schema exposes no tx_pin override.
 #
-# So, exactly as on hds_v1_1, SW1 and a serial console are mutually exclusive AT THE HARDWARE LEVEL:
-# SW1 sits on GPIO1 (U0TXD), the console needs that same pin, and there is no way to keep both. This
-# is a hardware constraint, not a configuration choice. Because the console is OFF by default, GPIO1
-# is free out of the box; a device that truly needs a serial console on this classic board must give
-# SW1 up — omit it or move its pin (see modules/core.yaml).
+# So the same classic-ESP32 hardware constraint applies: a GPIO1 button and a serial console are
+# mutually exclusive AT THE HARDWARE LEVEL — both need GPIO1 (U0TXD) and there is no way to keep both.
+# This is a hardware fact, not a configuration choice, and raising logger_baud_rate does NOT free
+# GPIO1. On hds_v1_1 the on-board SW1 button hits exactly this, and the way out is COMPOSITION: SW1
+# lives in the importable hds_v1_1_sw1.yaml, so a device omits that import to read serial logs (see
+# hardware/hds_v1_1.yaml, modules/core.yaml and the README). This v1.0 board wires NO on-board button
+# of its own, so GPIO1 is free out of the box and its serial console is unconflicted — a device just
+# sets a non-zero logger_baud_rate and imports no GPIO1 sensor.
 #
 # ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
 # This board carries seven module slots. Each substitution below resolves ONE module signal, for a

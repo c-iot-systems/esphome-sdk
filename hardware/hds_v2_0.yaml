@@ -18,6 +18,12 @@
 # UART pins — so no board GPIO is taken. logger_level and logger_baud_rate stay independent (level
 # gates record production, baud_rate gates console init); see modules/core.yaml.
 #
+# On the classic boards a GPIO1 button and the console cannot coexist, so hds_v1_1 keeps its SW1 in an
+# importable file and a device omits that import to read logs (the two-file composition; see
+# hardware/hds_v1_1.yaml and the README). The S3 needs no such split: because USB_SERIAL_JTAG frees
+# GPIO1 entirely, a GPIO1 button could keep its pin WHILE the console is on. (This board declares no
+# on-board button, so the point is only that the trade-off simply does not arise on the S3.)
+#
 # ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
 # This board carries seven module slots. Each substitution below resolves ONE module signal, for a
 # given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that

@@ -1,9 +1,14 @@
-# Positive validate fixture for the hds_v1_1 board — imports the hardware module plus
-# core + wifi + criotive_mqtt + ota + diagnostics + controls at the REVISION UNDER TEST, and must
+# Positive validate fixture for the hds_v1_1 board in its "reading serial logs" composition — the
+# board WITHOUT the SW1 opt-in file, with the serial console turned ON. It imports the hardware
+# module plus core + wifi + criotive_mqtt + ota + diagnostics at the REVISION UNDER TEST, and must
 # pass `esphome config`. One of the three configs release CI compiles for real.
 #
-# hds_v1_1's SW1 binary_sensor presses button_restart / button_factory, which controls.yaml owns,
-# so importing controls.yaml is what makes this board's on_click references resolve.
+# This is the oracle for the no-SW1 composition: because it does NOT import hds_v1_1_sw1.yaml, GPIO1
+# (U0TXD) stays on the UART and a serial console is available — so it sets a real, non-zero
+# logger_baud_rate on the classic ESP32 to prove serial logs are reachable on hds_v1_1 WITHOUT
+# editing any SDK file (omitting the import is the whole mechanism). controls.yaml is NOT imported
+# here: nothing presses button_restart / button_factory without SW1. The SW1-present composition is
+# the sibling hds_v1_1_sw1.yaml fixture.
 #
 # The hardware module supplies the esp32: platform block, so there is NO inline hardware stub here.
 # CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh
@@ -17,6 +22,10 @@ substitutions:
   # Override the hardware default (ALWAYS_ON) so the two v1 fixtures exercise both CAN termination
   # modes: this board sits mid-bus and must NOT terminate.
   can_resistor_status: ALWAYS_OFF
+  # Reading serial logs: no SW1 file is imported, so GPIO1 is free for UART0 — turn the console ON.
+  logger_level: INFO
+  logger_baud_rate: "115200"
+  logger_hardware_uart: UART0
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
@@ -42,6 +51,4 @@ packages:
       - path: modules/ota.yaml
         vars: {sdk_ref: __SDK_REF__}
       - path: modules/diagnostics.yaml
-        vars: {sdk_ref: __SDK_REF__}
-      - path: modules/controls.yaml
         vars: {sdk_ref: __SDK_REF__}
