@@ -1,12 +1,50 @@
-# wifi.yaml — opt-in WiFi station + fallback AP, captive portal, and WiFi diagnostics.
+# wifi.yaml — opt-in WiFi stations (up to 3) + fallback AP, captive portal, and WiFi diagnostics.
 #
 # Owns: wifi:, captive_portal, the AP-name lambda, the wifi_info text sensors and the wifi_signal
 # sensor. Required inputs (see the contract in core.yaml) are scoped to THIS module: importing
-# wifi.yaml makes wifi_ssid, wifi_password and wifi_ap_password mandatory — none has a default (no
-# credential ever ships a default in a public repo). Each is wrapped in the required-substitution
-# guard `${ x if x is defined else 1/0 }`: present -> the value unchanged; missing -> a hard
+# wifi.yaml makes wifi_ap_password mandatory — it has no default (no credential ever ships a usable
+# default in a public repo) and is wrapped in the required-substitution guard
+# `${ x if x is defined else 1/0 }`: present -> the value unchanged; missing -> a hard
 # `esphome config` error (see core.yaml's header for why plain references are not enough in ESPHome
-# 2026.5.1). wifi_reboot_timeout is the one optional input this module owns.
+# 2026.5.1). wifi_reboot_timeout and the six station-slot inputs below are optional.
+#
+# ── Three station slots ──────────────────────────────────────────────────────────────────────
+# A device may be reachable on more than one uplink (a site with two APs, a unit that moves between
+# sites), so the module configures up to THREE candidate networks instead of one. ESPHome rejects
+# `ssid:` alongside `networks:` ("You cannot use the 'ssid:' option together with 'networks:'",
+# wifi/__init__.py:406), so the list form is the only way to express this and single-network devices
+# use it too — they just fill one slot.
+#
+# ORDER IS NOT PRIORITY. ESPHome scans and picks the best matching network by signal, so the slots
+# are alternatives, not a fallback chain. The cap of three is a product choice, not a platform
+# limit — ESPHome allows MAX_WIFI_NETWORKS = 127 (wifi/__init__.py:152); a fourth slot is one more
+# term in the expression below plus one more pair of defaults.
+#
+# Every slot is OPTIONAL and defaults to the empty string. An empty default is not a credential
+# default: an empty SSID is unusable and no password is usable without its SSID, so the rule that
+# forbids shipping a working credential in a public repo is intact. What IS enforced is that a slot
+# is all-or-nothing — a password whose SSID is empty is a hard `esphome config` error via the same
+# 1/0 guard, which catches the likely misconfiguration (a typo'd or forgotten SSID name) now that
+# the credentials are no longer individually required.
+#
+# ── Zero slots: provisioning-only, and why it behaves differently ────────────────────────────
+# Leaving every slot empty is a SUPPORTED configuration: `networks:` resolves to [], the fallback AP
+# below stays up, and the device is provisioned through the captive portal. That mode is not merely
+# "the same thing with no defaults" — it changes where ESPHome stores the credentials the captive
+# portal saves. wifi_component.cpp:648:
+#
+#     uint32_t hash = this->has_sta() ? App.get_config_version_hash() : 88491487UL;
+#     this->pref_ = global_preferences->make_preference<wifi::SavedWifiSettings>(hash, true);
+#
+# get_config_version_hash() is an FNV-1a over the ENTIRE rendered config dump (core/__init__.py:706).
+# So with any slot filled, the saved credentials are keyed to the exact config and are silently
+# dropped by any change to it — including a firmware_version bump, i.e. EVERY OTA release, after
+# which the device falls back to the slots below. With no slot filled, has_sta() is false at boot,
+# the key is the constant 88491487UL, and captive-portal credentials survive OTAs.
+#
+# Related: WiFiComponent::start() loads those saved credentials via set_sta(), which begins with
+# clear_sta() (wifi_component.cpp:1003), so a captive-portal network REPLACES the slots below at
+# runtime rather than joining them.
 
 substitutions:
   # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the WiFi reboot
@@ -25,9 +63,29 @@ substitutions:
   # non-zero, so this can never silently regress again.
   wifi_reboot_timeout: 0s
 
+  # The three station slots. Empty = slot unused (see the header): not a credential default, and a
+  # device that overrides none of them is a valid provisioning-only device.
+  wifi_ssid: ""
+  wifi_password: ""
+  wifi_ssid_2: ""
+  wifi_password_2: ""
+  wifi_ssid_3: ""
+  wifi_password_3: ""
+
 wifi:
-  ssid: "${ wifi_ssid if wifi_ssid is defined else 1/0 }"
-  password: "${ wifi_password if wifi_password is defined else 1/0 }"
+  # One conditional list per slot, concatenated. Jinja here evaluates EXPRESSIONS only — no list
+  # comprehensions and no {% %} blocks — but a substitution expression may return a non-string, and
+  # the substitution pass re-attaches source metadata to whatever it returns (_restore_data_base,
+  # components/substitutions/__init__.py:96), so this list of dicts validates against the networks:
+  # schema exactly as a hand-written YAML list would.
+  #
+  # Per slot: SSID set -> contribute the network; both empty -> contribute nothing; password set
+  # with an empty SSID -> 1/0, a hard `esphome config` failure naming this expression. Empty slots
+  # collapse out, so filling slots 1 and 3 yields a two-entry list with no gap.
+  networks: >-
+    ${ ([{'ssid': wifi_ssid,   'password': wifi_password  }] if wifi_ssid   else ([] if not wifi_password   else 1/0))
+     + ([{'ssid': wifi_ssid_2, 'password': wifi_password_2}] if wifi_ssid_2 else ([] if not wifi_password_2 else 1/0))
+     + ([{'ssid': wifi_ssid_3, 'password': wifi_password_3}] if wifi_ssid_3 else ([] if not wifi_password_3 else 1/0)) }
   reboot_timeout: ${wifi_reboot_timeout}
   power_save_mode: none
   ap:
