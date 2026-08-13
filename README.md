@@ -41,12 +41,14 @@ Supported hardware:
 
 | Hardware module | Board | Variant | Framework |
 |---|---|---|---|
-| `hds_v1_0` / `hds_v1_0_idf` | `pico32` | `esp32` | arduino / esp-idf |
-| `hds_v1_1` / `hds_v1_1_idf` | `esp32dev` | `esp32` | arduino / esp-idf |
-| `hds_v2_0` / `hds_v2_0_idf` | `esp32-s3-devkitc-1` | `esp32s3` | arduino / esp-idf |
+| `hds_v1_0` | `pico32` | `esp32` | `${framework_variant}` (default esp-idf) |
+| `hds_v1_1` | `esp32dev` | `esp32` | `${framework_variant}` (default esp-idf) |
+| `hds_v2_0` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) |
 
-Each board ships an arduino and an esp-idf variant as separate files with concrete framework values
-(see "Hardware modules" below); a device imports exactly one.
+Each board is a single file whose esp32 framework is the `framework_variant` substitution, so one
+board file serves both frameworks. The default is **esp-idf**; a device that wants the arduino
+toolchain sets `framework_variant: arduino` (see "Hardware modules" below). Board and variant stay
+concrete.
 
 ## Substitution contract
 
@@ -236,8 +238,10 @@ long-offline image is never touched. OTA safety is preserved and offline surviva
 
 That gate only holds if **nothing confirms the image before the broker does**. ESPHome's `safe_mode`
 auto-confirms the running image on a timer — `esp_ota_mark_app_valid_cancel_rollback()` after
-`boot_is_good_after`, whose stock default is `1min` — and on esp-idf (where OTA rollback is enabled by
-default) that is the only early confirmer. At the stock 1 minute the image would already be
+`boot_is_good_after`, whose stock default is `1min` — and on esp-idf (where the board files pin
+`esp32: framework: advanced: enable_ota_rollback: true`, defining `USE_OTA_ROLLBACK`, so `esp32/hal.cpp`
+guards its own immediate boot-time mark-valid with `#ifndef USE_OTA_ROLLBACK` and defers to safe_mode)
+that timer is the only early confirmer. At the stock 1 minute the image would already be
 `ESP_OTA_IMG_VALID` four minutes before the 300s watchdog fires, so its `PENDING_VERIFY` gate could
 never trigger and a genuinely bad OTA would silently survive. `ota.yaml` therefore sets
 `safe_mode: boot_is_good_after: 330s` — past the watchdog — so the **broker**, not a boot timer, owns
@@ -300,7 +304,7 @@ CI (`scripts/check-automation-syntax.sh`) enforces this across `modules/` and `h
 esphome-sdk/
   README.md                     # this file — substitution contract, scope, versioning
   modules/                      # shared + optional-hardware modules
-  hardware/                     # per-board files: hds_v1_0/1_1/2_0 (arduino) + *_idf variants,
+  hardware/                     # per-board files: hds_v1_0/1_1/2_0 (framework via ${framework_variant}),
                                 #   the hds_v1_1_sw1 opt-in unit, and each board's slot pin table
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
@@ -386,19 +390,18 @@ CI compiles the C++ at least once per release.
 
 ### Hardware modules
 
-A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board, variant
-and framework are **concrete** — never a `${...}` board/variant/framework substitution. A device
-imports exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r`, `esp12`
-and `nodemcu32` boards.
+A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board and variant
+are **concrete** — never a `${...}` board/variant substitution. The build **framework** is the one
+esp32 field that varies per device, so it is the `framework_variant` substitution consumed inside the
+board file's own `esp32.framework.type` (default `esp-idf`, declared in `core.yaml`). A device imports
+exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r`, `esp12` and
+`nodemcu32` boards.
 
 | Module | board | variant | framework | board revision |
 |---|---|---|---|---|
-| `hds_v1_0.yaml` | `pico32` | `esp32` | `arduino` | v1.0 |
-| `hds_v1_0_idf.yaml` | `pico32` | `esp32` | `esp-idf` | v1.0 |
-| `hds_v1_1.yaml` | `esp32dev` | `esp32` | `arduino` | v1.1 |
-| `hds_v1_1_idf.yaml` | `esp32dev` | `esp32` | `esp-idf` | v1.1 |
-| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `arduino` | v2.0 (ESP32-S3) |
-| `hds_v2_0_idf.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `esp-idf` | v2.0 (ESP32-S3) |
+| `hds_v1_0.yaml` | `pico32` | `esp32` | `${framework_variant}` (default esp-idf) | v1.0 |
+| `hds_v1_1.yaml` | `esp32dev` | `esp32` | `${framework_variant}` (default esp-idf) | v1.1 |
+| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) | v2.0 (ESP32-S3) |
 
 - `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
 - `hds_v1_1.yaml` — the CAN termination resistor on GPIO12. The on-board SW1 button is **not** wired
@@ -417,20 +420,28 @@ visual feedback and drives those LED ids itself — no module reaches into a har
 these boards has indicator LEDs, so none ships OTA LED feedback and `ota.yaml` keeps no reference to
 any hardware id.
 
-#### esp-idf framework variants
+#### Framework selection — `framework_variant`
 
-Framework is a **concrete** value, so each board ships as two separate files rather than a templated
-`framework:` — an arduino build (`hds_v1_0.yaml`) and an esp-idf build (`hds_v1_0_idf.yaml`), and a
-device imports exactly one. The `_idf` file reuses its arduino sibling wholesale (same board, variant
-and the full slot pin table) and overrides **only** `esp32.framework` to `esp-idf`, so the two can
-never drift.
+Board and variant are concrete, but the build **framework** is a per-device choice, so it is a single
+`framework_variant` substitution consumed inside the board file's own `esp32.framework.type` rather
+than a doubled `_idf` board file. `core.yaml` declares the DEFAULT (`framework_variant: esp-idf`); a
+device overrides it per device with `framework_variant: arduino`. One board file therefore serves both
+frameworks, and the board/variant/framework stay a single logical block in one place. The valid tokens
+are `esp-idf` and `arduino`; substitution is textual and runs before schema validation, so the
+resolved literal is what the esp32 schema checks — the same mechanism `can_resistor_status` already
+uses.
 
-The framework choice has one behavioural consequence in the shared modules: `ota.yaml`'s post-boot
-**rollback watchdog is compiled inside `#ifdef USE_ESP_IDF`**. So on an **arduino** build it is
-compiled out entirely (there is no ESP-IDF rollback API on that path) and carries no protection; on
-an **esp-idf** build it is active and guards a freshly-flashed image (see the OTA rollback section).
-A device that needs the post-OTA rollback safety must therefore be on an esp-idf board file. The
-`*_idf` validate fixtures compile that guard on release.
+**The default is `esp-idf`.** Earlier revisions of these board files defaulted to arduino; a device
+that relied on that must now set `framework_variant: arduino` explicitly. The framework choice has one
+behavioural consequence in the shared modules: `ota.yaml`'s post-boot **rollback watchdog is compiled
+inside `#ifdef USE_ESP_IDF`**. So on an **arduino** build it is compiled out entirely (there is no
+ESP-IDF rollback API on that path) and carries no protection; on an **esp-idf** build it is active and
+guards a freshly-flashed image (see the OTA rollback section). Because the default is esp-idf, a
+default build ships that protection; a device that opts into arduino gives it up. The board files pin
+`esp32: framework: advanced: enable_ota_rollback: true` so the rollback support the watchdog depends
+on cannot be silently disabled — a no-op on arduino, since that option is emitted only on the esp-idf
+toolchain. The `framework_variant: arduino` validate fixture and the default (esp-idf) fixtures cover
+both paths; release CI compiles each for real.
 
 #### SW1 / GPIO1 — opt-in, because it silences serial logging
 
