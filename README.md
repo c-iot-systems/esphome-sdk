@@ -84,6 +84,8 @@ the modules it imports.
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
 | `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
+| `logger_baud_rate` | no | `0` | `0` **disables** the serial console (skips UART init) — see below |
+| `logger_hardware_uart` | no | `UART0` | logger UART; ESP32-S3 also accepts `USB_CDC` / `USB_SERIAL_JTAG` — see below |
 
 **No credential has a default.** A default password in a public repo is a default password in every
 device that forgets to override it. A missing required substitution must fail validation loudly, and
@@ -132,6 +134,36 @@ substitutions:
 ```
 
 The knob is unchanged — only its default flipped from `INFO` back to `NONE`.
+
+#### The serial console — `logger_baud_rate` and `logger_hardware_uart`
+
+`logger_level` gates which records are ever *produced*; `logger_baud_rate` gates whether a UART
+*console* exists to print them on. They are **independent**, and the console is **off by default**:
+`logger_baud_rate` defaults to **`0`**, which skips UART init entirely (ESPHome 2026.5.1 guards it
+with `if (this->baud_rate_ > 0)` and `0` still validates, since the field is `positive_int`
+= `int_range(min=0)`). So **raising serial logs takes both knobs** — a non-`NONE` `logger_level`
+*and* a non-zero `logger_baud_rate`:
+
+```yaml
+substitutions:
+  logger_level: INFO       # gate record production
+  logger_baud_rate: "115200"  # AND open the UART console — both are required
+```
+
+`logger_hardware_uart` selects which UART the console uses. It defaults to **`UART0`** (valid on
+every ESP32 variant); on the **ESP32-S3** (`hds_v2_0`) it additionally accepts `USB_CDC` and
+`USB_SERIAL_JTAG`.
+
+**Classic ESP32 (`hds_v1_0`, `hds_v1_1`): a serial console and SW1 are mutually exclusive — a
+hardware constraint, not a configuration choice.** `UART0`'s TX is **GPIO1 (U0TXD)**, the same pin
+`hds_v1_1`'s on-board **SW1** button uses. `UART1`/`UART2`'s default pins are wired to flash on
+typical modules and the logger schema exposes no `tx_pin` override, so there is no way to keep both.
+Because the console is off by default, GPIO1 is free and **SW1 works with no conflict out of the
+box**; a classic board that truly needs a serial console must **give SW1 up** (omit it or move its
+pin). `esphome config` cannot catch this — it is a physical-pin conflict the schema never sees — so
+it is stated here as a hardware fact. On the **ESP32-S3 `hds_v2_0`** there is no conflict: set
+`logger_hardware_uart: USB_SERIAL_JTAG` with a real `logger_baud_rate` and the console uses the
+built-in USB peripheral, no UART pins.
 
 ### Required substitutions fail loudly — the guard idiom
 
@@ -312,8 +344,8 @@ CI (`scripts/check-automation-syntax.sh`) enforces this across `modules/` and `h
 esphome-sdk/
   README.md                     # this file — substitution contract, scope, versioning
   modules/                      # shared + optional-hardware modules
-  hardware/                     # per-board files: hds_v1_0/1_1/2_0 (framework via ${framework_variant}),
-                                #   the hds_v1_1_sw1 opt-in unit, and each board's slot pin table
+  hardware/                     # per-board files: hds_v1_0/1_1/2_0 (framework via ${framework_variant});
+                                #   hds_v1_1 wires the on-board SW1 button, plus each board's slot pin table
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
   tests/negative/               # configs that MUST fail (missing required substitutions)
@@ -412,8 +444,8 @@ exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r
 | `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) | v2.0 (ESP32-S3) |
 
 - `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
-- `hds_v1_1.yaml` — the CAN termination resistor on GPIO12. The on-board SW1 button is **not** wired
-  here (see "SW1 / GPIO1" below).
+- `hds_v1_1.yaml` — the CAN termination resistor on GPIO12, plus the on-board SW1 button on GPIO1
+  (see "SW1 / GPIO1" below).
 - `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board has no fixed on-board I/O.
 
 **CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
@@ -463,16 +495,22 @@ rollback machinery is compiled at all. Rollback protection therefore lives only 
 The `framework_variant: arduino` validate fixture exercises exactly that pairing, and the default
 (esp-idf) fixtures cover the rollback path; release CI compiles each for real.
 
-#### SW1 / GPIO1 — opt-in, because it silences serial logging
+#### SW1 / GPIO1 — wired by default; a serial console is the trade-off
 
-The v1.1 board has an on-board push button, SW1, on **GPIO1** — which is the ESP32's **U0TXD**
-(primary UART TX). Configuring SW1 as a GPIO input takes GPIO1 away from the UART, so **the serial
-console goes silent** on that board. Because that trade-off must be a deliberate choice, SW1 is **not**
-wired in the board file; it lives in the importable unit **`hardware/hds_v1_1_sw1.yaml`**. To use the
-button, a device imports `hds_v1_1_sw1.yaml` **and** `controls.yaml` (SW1's `on_click` presses
-`button_restart` on a short click and `button_factory` on longer holds). To keep serial logs on the
-board instead, simply **do not** import `hds_v1_1_sw1.yaml` — GPIO1 stays on the UART. A substitution
-cannot conditionally omit a YAML block, so the two-file split is what makes SW1 genuinely optional.
+The v1.1 board has an on-board push button, **SW1**, on **GPIO1** — the ESP32's **U0TXD** (primary
+UART TX). It is **wired in `hds_v1_1.yaml`** and works out of the box, because the SDK ships the
+serial console **off** by default (`logger_baud_rate: 0`), leaving GPIO1 free. SW1's `on_click`
+presses `button_restart` on a short click and `button_factory` on longer holds, so a device that
+imports `hds_v1_1.yaml` **must also import `controls.yaml`** or those id references do not resolve.
+
+The catch is a **hardware constraint, not a configuration choice**: SW1 and a serial console both
+need GPIO1, so on this classic-ESP32 board they are **mutually exclusive**. `UART1`/`UART2`'s default
+pins are wired to flash on typical modules and the logger schema exposes no `tx_pin` override, so
+there is no way to keep both — and because the pins never appear in the config, `esphome config`
+cannot flag the conflict. A device that truly needs a serial console on this board must **give SW1
+up**: omit the `binary_sensor` or move its pin. (On the ESP32-S3 `hds_v2_0` there is no conflict —
+its console can use `USB_SERIAL_JTAG`, which needs no UART pins.) See the "serial console" note under
+[Logging](#logging-is-off-in-production-by-default).
 
 #### Slot pin tables — `slot_<n>_<module>_<signal>`
 

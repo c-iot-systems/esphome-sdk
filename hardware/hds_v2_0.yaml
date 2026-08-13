@@ -10,6 +10,14 @@
 # indicator LEDs, so this file owns no board-level component and no OTA visual feedback. It DOES
 # carry module slots, so the slot pin table below applies.
 #
+# ── Serial console / logger ───────────────────────────────────────────────────────────────────
+# The serial console is OFF by default (modules/core.yaml sets logger_baud_rate: 0, which skips UART
+# init). Unlike the classic-ESP32 boards this ESP32-S3 has no serial-console-vs-GPIO conflict: set
+# logger_hardware_uart: USB_SERIAL_JTAG (an S3-only option) together with a real, non-zero
+# logger_baud_rate and a non-NONE logger_level, and the console uses the built-in USB peripheral — no
+# UART pins — so no board GPIO is taken. logger_level and logger_baud_rate stay independent (level
+# gates record production, baud_rate gates console init); see modules/core.yaml.
+#
 # ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
 # This board carries seven module slots. Each substitution below resolves ONE module signal, for a
 # given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that
