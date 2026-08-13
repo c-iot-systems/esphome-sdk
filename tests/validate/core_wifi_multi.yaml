@@ -1,3 +1,5 @@
+# Fixture: core + wifi with all three station slots filled — proves the networks expression emits
+# one entry per slot, in order. Siblings: core_wifi.yaml (slot 1), core_wifi_provisioning_only.yaml.
 substitutions:
   device_name: core-wifi-multi-testdev
   firmware_version: "0.0.0-test"

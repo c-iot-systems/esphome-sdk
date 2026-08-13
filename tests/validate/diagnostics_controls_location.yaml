@@ -1,3 +1,5 @@
+# Fixture: core + diagnostics + controls + location must validate with no duplicate ids. wifi is
+# imported because google_location declares DEPENDENCIES = ["wifi"], not as extra scope.
 substitutions:
   device_name: diag-ctl-loc-testdev
   firmware_version: "0.0.0-test"

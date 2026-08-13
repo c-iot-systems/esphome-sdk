@@ -1,3 +1,5 @@
+# Fixture: the phone driver as a 4x3 telephone keypad — the key count must equal rows * columns.
+# Self-contained rather than importing core, since the driver needs no network. Release CI compiles it.
 esphome:
   name: phone-testdev
 

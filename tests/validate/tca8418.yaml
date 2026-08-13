@@ -1,3 +1,5 @@
+# Fixture: the tca8418 expander, CONSUMING a TCA8418GPIOPin on a binary_sensor so release CI
+# actually compiles the pin class — declaring the component alone would never build it.
 esphome:
   name: tca8418-testdev
 

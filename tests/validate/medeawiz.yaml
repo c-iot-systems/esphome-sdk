@@ -1,3 +1,5 @@
+# Fixture: the medeawiz driver on a uart bus with a tx pin (its FINAL_VALIDATE_SCHEMA requires one).
+# Self-contained rather than importing core, since the driver needs no network. Release CI compiles it.
 esphome:
   name: medeawiz-testdev
 

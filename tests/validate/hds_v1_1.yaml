@@ -1,3 +1,5 @@
+# Fixture: hds_v1_1 with SW1 DISABLED — the !remove sentinel drops sw1_button, freeing GPIO1 for a
+# real serial console. controls.yaml is not needed with SW1 off. Sibling: hds_v1_1_sw1.yaml.
 substitutions:
   device_name: hds-v1-1-testdev
   firmware_version: "0.0.0-test"

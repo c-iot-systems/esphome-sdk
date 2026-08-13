@@ -1,3 +1,5 @@
+# Fixture: the MQTT log-publishing OPT-IN — a consumer log_topic: block merges over the module's
+# null. retain: false is mandatory; a retained log topic replays a stale line to every subscriber.
 substitutions:
   device_name: mqtt-log-optin-testdev
   firmware_version: "0.0.0-test"

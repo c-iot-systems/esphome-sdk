@@ -1,3 +1,5 @@
+# Fixture: core + wifi with NO station slot — the provisioning-only device, reached via the fallback
+# AP and captive portal. wifi_ap_password stays required: it is the only way in.
 substitutions:
   device_name: core-wifi-provisioning-testdev
   firmware_version: "0.0.0-test"
