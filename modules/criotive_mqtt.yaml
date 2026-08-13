@@ -3,8 +3,10 @@
 # Owns: the `mqtt:` client, the topic prefix, the birth / last-will / shutdown (availability)
 # messages — all derived from ${device_name} — and the on_connect rollback confirmation. Required
 # inputs are scoped to THIS module (see the contract in core.yaml): importing criotive_mqtt.yaml
-# makes mqtt_broker, mqtt_ca_certificate, mqtt_username and mqtt_password mandatory. None has a
-# default — no credential ever ships a default in a public repo. mqtt_port, mqtt_reboot_timeout and
+# makes mqtt_broker, mqtt_ca_certificate, mqtt_username, mqtt_password and mqtt_port mandatory. None
+# has a default — no credential ever ships a default in a public repo, and mqtt_port carries no
+# default either: a connection parameter that could be silently wrong must be stated explicitly, so
+# omitting it fails validation via the same guard idiom (below). mqtt_reboot_timeout and
 # mqtt_discovery are the optional inputs this module owns; their defaults are declared below.
 #
 # ── MQTT is TLS ONLY when a CA is configured ──────────────────────────────────────────────────
@@ -41,7 +43,6 @@
 # the prefix.
 
 substitutions:
-  mqtt_port: "8883"
   # OPTIONAL client-id override. Defaults to ${device_name}, so client_id == topic_prefix == the
   # device name for the common case. Override per device when a deployment needs a specific client id
   # — e.g. a broker that requires client_id == username, or one that namespaces topics by client id.
@@ -64,7 +65,11 @@ substitutions:
 mqtt:
   id: mqtt_client
   broker: "${ mqtt_broker if mqtt_broker is defined else 1/0 }"
-  port: ${mqtt_port}
+  # REQUIRED, no default. A connection port that could be silently wrong must be stated explicitly, so
+  # mqtt_port uses the same forced-failure guard as the credentials: present -> the value; missing ->
+  # a ZeroDivisionError re-raised as a hard `esphome config` failure. 8883 is the conventional
+  # MQTT-over-TLS port, but the port alone does NOT enable TLS (that is mqtt_ca_certificate's job).
+  port: ${ mqtt_port if mqtt_port is defined else 1/0 }
   username: "${ mqtt_username if mqtt_username is defined else 1/0 }"
   password: "${ mqtt_password if mqtt_password is defined else 1/0 }"
   # The TLS trust anchor. Its PRESENCE — not the port — is what makes ESPHome call

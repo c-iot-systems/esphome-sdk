@@ -8,6 +8,7 @@ substitutions:
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
   mqtt_broker: mqtt.test.invalid
+  mqtt_port: "8883"
   # mqtt_ca_certificate intentionally omitted
   mqtt_username: test-mqtt-user
   mqtt_password: test-mqtt-password

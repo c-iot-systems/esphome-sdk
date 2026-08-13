@@ -70,26 +70,36 @@ the modules it imports.
 | `wifi_ssid` | **yes** | — | *(`wifi.yaml`)* |
 | `wifi_password` | **yes** | — | *(`wifi.yaml`)* — **no default, ever** |
 | `wifi_ap_password` | **yes** | — | fallback AP; **no default, ever** |
-| `wifi_reboot_timeout` | no | `0s` | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
+| `wifi_reboot_timeout` | no | `0s` _(safety)_ | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
 | `mqtt_broker` | **yes** | — | *(`criotive_mqtt.yaml`)* |
 | `mqtt_ca_certificate` | **yes** | — | **the TLS trust anchor — see below** |
-| `mqtt_port` | no | `8883` | conventional TLS port; the port alone does **not** enable TLS |
+| `mqtt_port` | **yes** | — | *(`criotive_mqtt.yaml`)* — stated explicitly, no default; the port alone does **not** enable TLS |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
-| `mqtt_client_id` | no | `${device_name}` | MQTT client id; independent of `topic_prefix` — set it explicitly when a deployment needs a specific value — see below |
-| `mqtt_reboot_timeout` | no | `0s` | `0s` **disables** the MQTT reboot (offline survival) |
-| `mqtt_discovery` | no | `true` | Home Assistant discovery |
+| `mqtt_client_id` | no | `${device_name}` _(convenience)_ | MQTT client id; independent of `topic_prefix` — set it explicitly when a deployment needs a specific value — see below |
+| `mqtt_reboot_timeout` | no | `0s` _(safety)_ | `0s` **disables** the MQTT reboot (offline survival) |
+| `mqtt_discovery` | no | `true` _(convenience)_ | Home Assistant discovery |
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
-| `ota_attempts` | no | `50` | safe-mode boot attempts — larger recovery budget (ESPHome stock is `5`) |
+| `ota_attempts` | no | `50` _(safety)_ | safe-mode boot attempts — larger recovery budget (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
-| `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
-| `logger_level` | no | `NONE` | logging is **off by default** — see below |
-| `logger_baud_rate` | no | `0` | `0` **disables** the serial console (skips UART init) — see below |
-| `logger_hardware_uart` | no | `UART0` | logger UART; ESP32-S3 also accepts `USB_CDC` / `USB_SERIAL_JTAG` — see below |
+| `ota_http_server_test` | no | `${ota_http_server}` _(convenience)_ | *(`ota.yaml`)* test/staging OTA host — see below |
+| `logger_level` | no | `NONE` _(safety)_ | logging is **off by default** — see below |
+| `logger_baud_rate` | no | `0` _(safety)_ | `0` **disables** the serial console (skips UART init) — see below |
+| `logger_hardware_uart` | no | `UART0` _(convenience)_ | logger UART; ESP32-S3 also accepts `USB_CDC` / `USB_SERIAL_JTAG` — see below |
 
-**No credential has a default.** A default password in a public repo is a default password in every
-device that forgets to override it. A missing required substitution must fail validation loudly, and
-the PR-time `esphome config` check plus the negative-fixture harness prove it does.
+Defaults are tagged **_(safety)_** or **_(convenience)_**. A **safety** default encodes a deliberate
+protective posture — offline survival (`*_reboot_timeout: 0s`), production-quiet logging
+(`logger_level: NONE`, `logger_baud_rate: 0`), a larger recovery budget (`ota_attempts`) — and should
+not be overridden without a specific reason; the same holds for the hardware-file safety defaults
+(`framework_variant: esp-idf` and `ota_rollback: true`, which ship OTA rollback protection, and
+`can_resistor_status: ALWAYS_ON`). A **convenience** default is just a sensible starting value
+(`mqtt_client_id`, `mqtt_discovery`, `logger_hardware_uart`, `ota_http_server_test`) that a device
+overrides freely.
+
+**No credential — and now no connection port — has a default.** A default password in a public repo is
+a default password in every device that forgets to override it, and a defaulted `mqtt_port` could be
+silently wrong; a missing required substitution must fail validation loudly, and the PR-time
+`esphome config` check plus the negative-fixture harness prove it does.
 
 ### A device never reboots through an outage — offline survival is an invariant
 
