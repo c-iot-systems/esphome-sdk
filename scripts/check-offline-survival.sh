@@ -6,7 +6,7 @@
 # operating indefinitely while offline, WITHOUT rebooting. Field devices on unreliable uplinks must
 # ride out an outage rather than power-cycle through it. In
 # ESPHome, `reboot_timeout: 0s` DISABLES the connectivity reboot outright (both wifi and mqtt guard
-# App.reboot() with `reboot_timeout_ != 0`), so legacy pinned both timeouts to 0s. ESPHome's stock
+# App.reboot() with `reboot_timeout_ != 0`), so both timeouts default to 0s here. ESPHome's stock
 # default is 15min. This gate fails the build if any `reboot_timeout` under modules/ or hardware/
 # resolves to a NON-ZERO default, so the regression can never silently return.
 #

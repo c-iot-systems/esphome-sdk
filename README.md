@@ -160,8 +160,8 @@ exits non-zero.
 `certificate_authority` is present in the config; without it the transport is plain TCP whatever the
 port, and a config that sets `8883` and no CA sends credentials in the clear. `criotive_mqtt.yaml`
 therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
-`certificate_authority`. The platform injects the broker's CA when generating the config, so staging
-and production can differ and the CA can rotate without an SDK release.
+`certificate_authority`. The CA is supplied by the caller, so different deployments can select their
+own trust anchor and rotate it without an SDK release.
 
 ### `mqtt_client_id` — set it explicitly when a deployment needs a specific value
 
@@ -444,8 +444,8 @@ The values are **static data**, transcribed from the board's slot/module definit
 against them; there is no generator, codegen step or regeneration procedure in this repository. Which
 slot actually holds which module is the **consumer's** responsibility: the SDK never sees a device's
 populated slot map, so it **cannot** validate that `slot_3_double_relay_*` is used on a board whose
-slot 3 really holds a Double Relay. That cross-check — present in the legacy slot-map generator, which
-built each device config from an explicit populated slot map — is not reproduced here and becomes
-authoring discipline. `esphome config` still catches a **mistyped** name (its `${...}` stays a literal
+slot 3 really holds a Double Relay. A tool that consumes an explicit populated slot map could enforce
+that pairing; this SDK does not, so it becomes authoring discipline. `esphome config` still catches a
+**mistyped** name (its `${...}` stays a literal
 and fails the pin schema), which the `slot_pins_*` validate fixtures exercise — one substitution per
 module type per board — but it cannot catch a *wrong-but-valid* slot choice.
