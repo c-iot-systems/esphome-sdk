@@ -24,8 +24,13 @@
 # logger_level AND a non-zero logger_baud_rate — the two are independent (level gates record
 # production, baud_rate gates UART init). On this classic-ESP32 board the console lands on UART0,
 # whose TX is GPIO1 (U0TXD); UART1/UART2's default pins are wired to flash on typical modules and the
-# logger schema exposes no tx_pin override. Unlike hds_v1_1 this board wires no on-board button, so
-# there is no SW1/GPIO1 conflict here — but the same logger contract applies (see modules/core.yaml).
+# logger schema exposes no tx_pin override.
+#
+# So, exactly as on hds_v1_1, SW1 and a serial console are mutually exclusive AT THE HARDWARE LEVEL:
+# SW1 sits on GPIO1 (U0TXD), the console needs that same pin, and there is no way to keep both. This
+# is a hardware constraint, not a configuration choice. Because the console is OFF by default, GPIO1
+# is free out of the box; a device that truly needs a serial console on this classic board must give
+# SW1 up — omit it or move its pin (see modules/core.yaml).
 #
 # ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
 # This board carries seven module slots. Each substitution below resolves ONE module signal, for a
