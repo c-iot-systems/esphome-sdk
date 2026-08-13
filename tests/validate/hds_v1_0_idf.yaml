@@ -1,0 +1,43 @@
+# Positive validate fixture for the hds_v1_0_idf board — the esp-idf framework variant. It imports the
+# _idf hardware module (which reuses the arduino board file and overrides only the framework) plus
+# core + wifi + criotive_mqtt + ota + diagnostics + controls, and must pass `esphome config`. This is
+# the coverage for BOTH frameworks: the arduino build is exercised by hds_v1_0.yaml, this by the esp-idf
+# variant. On the esp-idf framework the ota.yaml rollback watchdog (#ifdef USE_ESP_IDF) is compiled in,
+# so this fixture is also where release CI compiles that guard for real.
+#
+# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
+# the package ref and every vars.sdk_ref are the placeholder.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no value
+# here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: hds-v1-0-idf-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_0_idf.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/diagnostics.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
+        vars: {sdk_ref: __SDK_REF__}

@@ -1,0 +1,45 @@
+# Positive validate fixture for the hds_v1_1 SW1 opt-in. It imports the v1.1 board, the OPT-IN
+# hds_v1_1_sw1.yaml (the on-board button on GPIO1) and controls.yaml, plus core + wifi + criotive_mqtt
+# + ota, and must pass `esphome config`. This is the oracle for Part 3: SW1's on_click presses
+# button_restart / button_factory, which controls.yaml owns, so importing controls.yaml is what makes
+# the button's id references resolve — and importing hds_v1_1_sw1.yaml is what puts GPIO1 into use.
+# A device that omits this file keeps GPIO1 (U0TXD) free for serial logging; that path is the plain
+# hds_v1_1.yaml fixture, which now carries no SW1.
+#
+# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
+# the package ref and every vars.sdk_ref are the placeholder.
+#
+# Self-contained: literal test values for every required substitution. The repo is public, so no value
+# here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
+substitutions:
+  device_name: hds-v1-1-sw1-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: hardware/hds_v1_1_sw1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/diagnostics.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
+        vars: {sdk_ref: __SDK_REF__}
