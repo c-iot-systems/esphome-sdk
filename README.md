@@ -67,8 +67,12 @@ the modules it imports.
 | `device_name` | **yes** | — | ESPHome node name; also the MQTT topic prefix |
 | `firmware_version` | **yes** | — | published as a text sensor |
 | `sdk_ref` | **yes** | — | must equal the package `ref`; CI-enforced |
-| `wifi_ssid` | **yes** | — | *(`wifi.yaml`)* |
-| `wifi_password` | **yes** | — | *(`wifi.yaml`)* — **no default, ever** |
+| `wifi_ssid` | no | *(empty)* | *(`wifi.yaml`)* station slot 1 — see **Up to three WiFi networks** |
+| `wifi_password` | no | *(empty)* | required once slot 1 has an SSID; **no usable default, ever** |
+| `wifi_ssid_2` | no | *(empty)* | station slot 2 |
+| `wifi_password_2` | no | *(empty)* | required once slot 2 has an SSID |
+| `wifi_ssid_3` | no | *(empty)* | station slot 3 |
+| `wifi_password_3` | no | *(empty)* | required once slot 3 has an SSID |
 | `wifi_ap_password` | **yes** | — | fallback AP; **no default, ever** |
 | `wifi_reboot_timeout` | no | `0s` _(safety)_ | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
 | `mqtt_broker` | **yes** | — | *(`criotive_mqtt.yaml`)* |
@@ -100,6 +104,57 @@ overrides freely.
 a default password in every device that forgets to override it, and a defaulted `mqtt_port` could be
 silently wrong; a missing required substitution must fail validation loudly, and the PR-time
 `esphome config` check plus the negative-fixture harness prove it does.
+
+### Up to three WiFi networks — and the provisioning-only mode
+
+`wifi.yaml` configures **up to three** candidate station networks, in three slots:
+`wifi_ssid`/`wifi_password`, `wifi_ssid_2`/`wifi_password_2`, `wifi_ssid_3`/`wifi_password_3`. A slot
+is used only when its SSID is non-empty, so a single-network device fills slot 1 and ignores the
+rest, and filling slots 1 and 3 yields a two-entry list with no gap.
+
+```yaml
+substitutions:
+  wifi_ssid: site-main
+  wifi_password: main-network-password
+  wifi_ssid_2: site-backup          # optional; omit the pair entirely to leave the slot unused
+  wifi_password_2: backup-network-password
+```
+
+**Order is not priority.** ESPHome scans and connects to the best network it can see among those
+configured, so the slots are alternatives rather than a fallback chain. Three is a product choice,
+not a platform limit — ESPHome's own cap is `MAX_WIFI_NETWORKS = 127`.
+
+**A slot is all-or-nothing.** Every slot is optional and defaults to empty, which is *not* a
+credential default: an empty SSID is unusable, and no password is usable without its SSID. But a
+password set against an **empty SSID** is a hard `esphome config` failure, via the same `1/0` guard
+idiom used for required substitutions. That keeps the likely misconfiguration — a forgotten or
+mistyped SSID name — loud. The case it cannot catch is a typo in *both* names of a pair, which
+leaves the slot silently unused.
+
+**Leaving every slot empty is supported**, and is how a device ships when WiFi is provisioned in the
+field through the captive portal rather than baked into the firmware. It is not simply "the same
+config minus the credentials" — it changes where ESPHome keeps the credentials the captive portal
+saves (`wifi_component.cpp:648`):
+
+```cpp
+uint32_t hash = this->has_sta() ? App.get_config_version_hash() : 88491487UL;
+this->pref_ = global_preferences->make_preference<wifi::SavedWifiSettings>(hash, true);
+```
+
+`get_config_version_hash()` is an FNV-1a over the **entire rendered config dump**
+(`core/__init__.py:706`). So:
+
+- **With any slot filled**, captive-portal credentials are keyed to that exact config and are
+  silently dropped by *any* change to it — a new entity, an ESPHome upgrade, or simply a
+  `firmware_version` bump, which means **every OTA release**. The device then falls back to the
+  configured slots. Fine when the slots are the real networks; surprising if someone re-provisioned
+  a unit by hand and expected it to stick.
+- **With no slot filled**, `has_sta()` is false at boot, the key is the constant `88491487UL`, and
+  the saved credentials survive OTAs and config changes.
+
+Either way the captive-portal network **replaces** the configured slots rather than joining them:
+`WiFiComponent::start()` applies the saved credentials through `set_sta()`, which begins with
+`clear_sta()` (`wifi_component.cpp:1003`).
 
 ### A device never reboots through an outage — offline survival is an invariant
 
@@ -188,7 +243,7 @@ substitution lands in a free-form string field that accepts the literal, so each
 guard:
 
 ```yaml
-password: "${ wifi_password if wifi_password is defined else 1/0 }"
+password: "${ wifi_ap_password if wifi_ap_password is defined else 1/0 }"
 ```
 
 When the value is present the expression returns it unchanged; when it is missing the
