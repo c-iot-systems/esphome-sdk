@@ -40,6 +40,11 @@ jobs:
           bash scripts/check-offline-survival.sh --self-test
           bash scripts/check-offline-survival.sh
 
+      - name: OTA rollback-timing gate (safe_mode confirms after the watchdog)
+        run: |
+          bash scripts/check-rollback-timing.sh --self-test
+          bash scripts/check-rollback-timing.sh
+
       - name: Materialize the revision under test into validate fixtures
         run: |
           set -euo pipefail

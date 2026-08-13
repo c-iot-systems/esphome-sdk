@@ -44,6 +44,11 @@ jobs:
           bash scripts/check-sdk-ref.sh --self-test
           bash scripts/check-sdk-ref.sh
 
+      - name: OTA rollback-timing gate (safe_mode confirms after the watchdog)
+        run: |
+          bash scripts/check-rollback-timing.sh --self-test
+          bash scripts/check-rollback-timing.sh
+
       - name: Materialize the released tag into validate fixtures
         run: |
           set -euo pipefail
