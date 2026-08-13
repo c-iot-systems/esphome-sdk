@@ -11,9 +11,9 @@
 # Port 8883 does NOT enable TLS. Verified in ESPHome 2026.5.1: mqtt/__init__.py:439 calls
 # set_ca_certificate ONLY when `certificate_authority` is present; without it the transport is plain
 # TCP whatever the port, so credentials cross the network in the clear. criotive_mqtt.yaml therefore
-# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default (see
-# ADR-0022). The platform injects the broker's CA when generating the config, so staging and
-# production can differ and the CA can rotate without an SDK release.
+# wires `certificate_authority` from a REQUIRED mqtt_ca_certificate substitution with no default. The
+# CA is supplied by the caller, so staging and production can use different trust anchors and the CA
+# can rotate without an SDK release.
 #
 # ── Required-substitution guard ───────────────────────────────────────────────────────────────
 # Merely referencing ${x} does not make it required: ESPHome's substitution pass is non-strict, so a
@@ -23,34 +23,29 @@
 # re-raised as a hard `esphome config` failure naming the variable. See core.yaml's header and the
 # README for the full rationale; tests/negative/ proves each omission fails.
 #
-# ── Not ported (deprecated — ADR-0021) ────────────────────────────────────────────────────────
-# The legacy on_boot MQTT lambda's NVS client-cert loading, the Azure/`were_certs_loaded` fallback
-# broker, and the topic MAC suffix are gone: MQTT is the only transport and there is no fallback
-# broker path. ADR-0021 covers exactly that NVS/fallback-broker removal. The topic prefix and
-# availability messages, which the legacy set imperatively in that lambda, are now declared
-# statically from ${device_name}.
+# ── The topic prefix and availability messages are declared statically ─────────────────────────
+# This is a plain MQTT-over-TLS transport: one broker, no fallback broker path. The topic prefix and
+# the birth/will/shutdown availability messages are declared statically from ${device_name} rather
+# than being built at runtime. Not included: device-twin/Azure support — out of scope for this SDK.
 #
-# ── client_id is set explicitly, and is NOT an ADR-0021 concern ────────────────────────────────
-# The one piece of that lambda that IS ported is the EMQX client-id override — as the optional
-# `mqtt_client_id` substitution below. This is deliberately separate from ADR-0021: ADR-0021 says
-# nothing about MQTT_BROKER_CLIENT_ID, so neither its removal nor its restoration is attributable
-# to it. It matters because ESPHome's OWN default is wrong for this broker: left unset,
-# mqtt/mqtt_client.cpp:44 sets client_id to `${device_name}-<mac>` (make_name_with_suffix), and two
-# independent failures follow. EMQX requires `client_id == username`, so a MAC-suffixed id is
-# refused at CONNACK; and the broker mounts `${clientid}/`, the segment the backend reads as
-# `cloudId`, so a mismatched id makes telemetry attributed to nothing and silently dropped — not
-# just a failed connect. criotive_mqtt.yaml therefore wires `client_id` from `mqtt_client_id`, which
-# DEFAULTS to ${device_name} (matching username and topic_prefix for the common case) and is
-# overridden per device to a tenant-prefixed id like `00000009d1:toystory1`. client_id and
-# topic_prefix stay INDEPENDENT — some devices use a non-prefixed id while keeping the device-name
-# topic prefix — so mqtt_client_id is its own override, never derived from the prefix.
+# ── client_id is set explicitly ────────────────────────────────────────────────────────────────
+# `mqtt_client_id` (optional, below) sets the MQTT client id explicitly, because ESPHome's OWN
+# default is unsuitable here: left unset, mqtt/mqtt_client.cpp:44 sets client_id to
+# `${device_name}-<mac>` (make_name_with_suffix). That matters for two reasons. First, SOME brokers
+# require `client_id == username`, and a MAC-suffixed id would not match. Second, some deployments
+# use the client id to namespace topics, so an unexpected id can misroute a device's messages. So
+# `client_id` is wired from `mqtt_client_id`, which DEFAULTS to ${device_name} (matching username and
+# topic_prefix for the common case) and is overridden per device when a deployment needs a specific
+# value. client_id and topic_prefix stay INDEPENDENT — a device may use a non-prefixed id while
+# keeping the device-name topic prefix — so mqtt_client_id is its own override, never derived from
+# the prefix.
 
 substitutions:
   mqtt_port: "8883"
   # OPTIONAL client-id override. Defaults to ${device_name}, so client_id == topic_prefix == the
-  # device name for the common case, which is also what EMQX needs (it requires client_id ==
-  # username). Override per device with a tenant-prefixed id (e.g. 00000009d1:toystory1) when the
-  # broker account expects one. Kept INDEPENDENT of topic_prefix — see the header note and README.
+  # device name for the common case. Override per device when a deployment needs a specific client id
+  # — e.g. a broker that requires client_id == username, or one that namespaces topics by client id.
+  # Kept INDEPENDENT of topic_prefix — see the header note and README.
   mqtt_client_id: ${device_name}
   # OFFLINE-SURVIVAL INVARIANT (see core.yaml's header + the README): 0s DISABLES the MQTT reboot
   # outright, so a device rides out a broker/uplink outage instead of power-cycling every timeout.
@@ -78,9 +73,10 @@ mqtt:
   reboot_timeout: ${mqtt_reboot_timeout}
   discovery: ${mqtt_discovery}
   discover_ip: false
-  # client_id set EXPLICITLY — never left to ESPHome's ${device_name}-<mac> default (mqtt_client.cpp:44)
-  # — so it equals the broker username and the ${clientid}/ mountpoint the backend reads as cloudId.
-  # Defaults to ${device_name} via mqtt_client_id; override per device. Independent of topic_prefix.
+  # client_id set EXPLICITLY — never left to ESPHome's ${device_name}-<mac> default (mqtt_client.cpp:44),
+  # so a broker that requires client_id == username, or that namespaces topics by client id, gets a
+  # predictable value. Defaults to ${device_name} via mqtt_client_id; override per device. Independent
+  # of topic_prefix.
   client_id: ${mqtt_client_id}
   # Topic prefix and the Home Assistant availability messages, all derived from ${device_name}.
   topic_prefix: ${device_name}

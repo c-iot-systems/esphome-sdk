@@ -4,7 +4,7 @@
 # available; it then instantiates `medeawiz:` on the concrete `uart:` its board wires (the Sprite
 # is controlled over a 3.5mm 4-pole TTL serial port) and drives playback from its own private logic.
 # The instance is device-specific — which UART, baud rate, optional multi-drop address, and the
-# on_file / on_end_of_file automations a given prop needs — so no `medeawiz:` instance is declared
+# on_file / on_end_of_file automations a given device needs — so no `medeawiz:` instance is declared
 # in this shared module. The component DEPENDS on uart, so a consumer must also declare a `uart:`
 # bus with a tx pin (the Sprite receives commands on tx).
 #

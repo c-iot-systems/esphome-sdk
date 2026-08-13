@@ -1,9 +1,9 @@
 # criotive ESPHome SDK
 
 Shared ESPHome configuration for criotive firmware, consumed through ESPHome's native
-[`packages:`](https://esphome.io/components/packages.html) mechanism. The AI firmware-generation
-path and the builder sidecar assemble a device's `main.yaml` by importing modules from this
-repository at a pinned tag.
+[`packages:`](https://esphome.io/components/packages.html) mechanism. The firmware-generation path
+and the build service assemble a device's `main.yaml` by importing modules from this repository at a
+pinned tag.
 
 ```yaml
 packages:
@@ -41,15 +41,18 @@ Supported hardware:
 
 | Hardware module | Board | Variant | Framework |
 |---|---|---|---|
-| `hds_v1_0` | `pico32` | `esp32` | arduino |
-| `hds_v1_1` | `esp32dev` | `esp32` | arduino |
-| `hds_v2_0` | `esp32-s3-devkitc-1` | `esp32s3` | arduino |
+| `hds_v1_0` / `hds_v1_0_idf` | `pico32` | `esp32` | arduino / esp-idf |
+| `hds_v1_1` / `hds_v1_1_idf` | `esp32dev` | `esp32` | arduino / esp-idf |
+| `hds_v2_0` / `hds_v2_0_idf` | `esp32-s3-devkitc-1` | `esp32s3` | arduino / esp-idf |
+
+Each board ships an arduino and an esp-idf variant as separate files with concrete framework values
+(see "Hardware modules" below); a device imports exactly one.
 
 ## Substitution contract
 
 `core.yaml` is the one documented place answering *"what must every firmware supply?"*. Every
 parameter arrives as a YAML `substitutions:` value — **nothing is a C++ preprocessor define**, because
-the builder sidecar injects no build flags. Substitution names are `lower_snake_case`.
+the build path injects no compiler flags. Substitution names are `lower_snake_case`.
 
 **"Required" is scoped to the module that uses it.** Only `device_name`, `firmware_version` and
 `sdk_ref` are required by `core.yaml` and therefore by every device. `wifi_*` is required by
@@ -71,11 +74,11 @@ the modules it imports.
 | `mqtt_port` | no | `8883` | conventional TLS port; the port alone does **not** enable TLS |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
-| `mqtt_client_id` | no | `${device_name}` | broker client id — **must equal `mqtt_username`** on EMQX; also the `${clientid}/` mountpoint the backend reads as `cloudId` — see below |
+| `mqtt_client_id` | no | `${device_name}` | MQTT client id; independent of `topic_prefix` — set it explicitly when a deployment needs a specific value — see below |
 | `mqtt_reboot_timeout` | no | `0s` | `0s` **disables** the MQTT reboot (offline survival) |
 | `mqtt_discovery` | no | `true` | Home Assistant discovery |
 | `ota_password` | **yes** | — | *(`ota.yaml`)* — **no default, ever** |
-| `ota_attempts` | no | `50` | safe-mode boot attempts — matches legacy (ESPHome stock is `5`) |
+| `ota_attempts` | no | `50` | safe-mode boot attempts — larger recovery budget (ESPHome stock is `5`) |
 | `ota_http_server` | **yes** | — | HTTPS OTA download host |
 | `ota_http_server_test` | no | `${ota_http_server}` | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `NONE` | logging is **off by default** — see below |
@@ -86,10 +89,9 @@ the PR-time `esphome config` check plus the negative-fixture harness prove it do
 
 ### A device never reboots through an outage — offline survival is an invariant
 
-**A device MUST continue operating indefinitely while offline, without rebooting.** Field units —
-freezer monitors, escape-room props — sit on flaky uplinks and must ride out an outage rather than
-power-cycle through it. This is not a preference; legacy pinned both reboot timeouts to `0s` years
-ago for exactly this reason, and the SDK restores it.
+**A device MUST continue operating indefinitely while offline, without rebooting.** Field devices on
+unreliable uplinks must ride out an outage rather than power-cycle through it. This is not a
+preference; both reboot timeouts are pinned to `0s` for exactly this reason.
 
 - `wifi_reboot_timeout` and `mqtt_reboot_timeout` both default to **`0s`**, which **disables** the
   respective connectivity reboot outright. Verified against ESPHome 2026.5.1 source — both components
@@ -106,20 +108,18 @@ ago for exactly this reason, and the SDK restores it.
 
 #### "Never auto-publish": use `update_interval: never`
 
-Legacy expressed a "never auto-publish" periodic sensor with an `INFINITE_UPDATE_INTERVAL`
-(`4294967295ms`) sentinel. The SDK does **not** carry that magic value: ESPHome's `update_interval:
-never` literal says the same thing far more clearly and is already used at every legacy use site
-(`firmware_version`, `sensor_boots`, `ota_status`, `google_location`). Future entities that should
-publish only on an explicit `publish_state()` must use `never`, not a numeric sentinel.
+A "never auto-publish" periodic sensor must **not** be expressed with a magic maximum-interval
+number. ESPHome's `update_interval: never` literal says exactly that, far more clearly, and is used
+at every such site here (`firmware_version`, `sensor_boots`, `ota_status`, `google_location`). Future
+entities that should publish only on an explicit `publish_state()` must use `never`, not a numeric
+sentinel.
 
 ### Logging is off in production by default
 
 `logger_level` defaults to **`NONE`**: a device ships silent and its `logger:` emits nothing until a
-consumer raises the level **deliberately**. This mirrors the legacy firmware, whose ESPHome baseline
-was `LOGGER_LEVEL: "NONE"` and was only raised by opting into a named environment
-(`info` / `debug` / `verbose` / `veryverbose`) — never on by default. A chatty default is not free:
-it costs flash, CPU and (when a device also publishes logs) broker traffic on every unit that forgot
-to turn it down.
+consumer raises the level **deliberately**, per device — never on by default. A chatty default is not
+free: it costs flash, CPU and (when a device also publishes logs) broker traffic on every unit that
+forgot to turn it down.
 
 To raise it, set the substitution per device to one of ESPHome's levels — `INFO`, `DEBUG`,
 `VERBOSE` or `VERY_VERBOSE`:
@@ -163,35 +163,34 @@ therefore takes a **required `mqtt_ca_certificate` substitution with no default*
 `certificate_authority`. The platform injects the broker's CA when generating the config, so staging
 and production can differ and the CA can rotate without an SDK release.
 
-### `mqtt_client_id` — a wrong client id silently drops telemetry
+### `mqtt_client_id` — set it explicitly when a deployment needs a specific value
 
-The MQTT client id is **not** cosmetic and it is **not** the topic prefix. It defaults to
-`${device_name}` (so `client_id == topic_prefix == mqtt_username` for the common case) and is
-overridden per device with `mqtt_client_id` — typically a tenant-prefixed id such as
-`00000009d1:toystory1`.
+The MQTT client id is **not** the topic prefix. `mqtt_client_id` sets the MQTT `client_id`; it
+defaults to `${device_name}` (so `client_id == topic_prefix` for the common case) and is overridden
+per device when a specific value is required. It is the SDK's own knob — the SDK does not otherwise
+depend on what a broker does with it, and only what the SDK owns is documented here.
 
-Two independent things break if it is wrong:
+Whether the client id matters, and how, depends on the broker:
 
-- **EMQX refuses the connection.** The broker requires `client_id == username`; a mismatch is
-  rejected at CONNACK, so the device never connects.
-- **Telemetry is attributed to nothing and dropped.** The broker mounts `${clientid}/`, and the
-  backend reads that leading segment as the device's `cloudId`. A client id that does not match the
-  provisioned device means telemetry is published under an unknown mountpoint and **silently
-  discarded** — a far quieter failure than a refused connect.
+- **Some brokers require `client_id == username`** and reject a mismatch at CONNACK. Others do not —
+  a broker whose authenticator matches, say, a client certificate's common name against the username
+  never compares the client id, so a device with `client_id != username` connects fine there.
+- **Some brokers use the client id to namespace topics**, so an unexpected id can misroute a
+  device's messages. Set `mqtt_client_id` explicitly when a deployment relies on either behaviour.
 
-`client_id` and `topic_prefix` are therefore kept **independent**: some devices use a non-prefixed
-client id (e.g. `gelo-c82e18b52974`) while keeping the device-name topic prefix, so `mqtt_client_id`
-is its own override and is never derived from the prefix. `criotive_mqtt.yaml` also sets `client_id`
-**explicitly** rather than relying on ESPHome's default — left unset, ESPHome
-(`mqtt/mqtt_client.cpp:44`) sets it to `${device_name}-<mac>`, which would fail both checks above.
+`client_id` and `topic_prefix` are kept **independent**: a device may use a non-prefixed client id
+while keeping the device-name topic prefix, so `mqtt_client_id` is its own override and is never
+derived from the prefix. `criotive_mqtt.yaml` also sets `client_id` **explicitly** rather than
+relying on ESPHome's default — left unset, ESPHome (`mqtt/mqtt_client.cpp:44`) sets it to
+`${device_name}-<mac>`, which is unpredictable and can break both broker behaviours above.
 `tests/validate/mqtt_client_id.yaml` proves an overridden id resolves into `mqtt: client_id:` while
 `topic_prefix` stays `${device_name}`; `tests/validate/mqtt_ota.yaml` proves the default path
 resolves `client_id` to the device name.
 
 ### MQTT log publishing is off by default
 
-Legacy firmware never published logs to the broker — it had no `log_topic` at all. `criotive_mqtt.yaml`
-keeps that parity: **no device streams its logs to MQTT unless a consumer opts in.**
+`criotive_mqtt.yaml` ships with MQTT log publishing off: **no device streams its logs to MQTT unless
+a consumer opts in.**
 
 This is not the same as omitting the key. ESPHome's `mqtt` component (`mqtt/__init__.py`,
 `validate_config`) **re-injects** a default `${topic_prefix}/debug` log topic (with `retain: true`)
@@ -227,7 +226,7 @@ one arbitrary, stale log line to every new subscriber — never what a log consu
 
 `ota.yaml` arms a 300s post-boot rollback watchdog and `criotive_mqtt.yaml` cancels it once the
 broker is reached — so a freshly-flashed image that cannot reach the broker rolls back to the last
-known-good build. Audited against the offline-survival invariant (AIOT-98): ESP-IDF's
+known-good build. Audited against the offline-survival invariant: ESP-IDF's
 `esp_ota_mark_app_invalid_rollback_and_reboot()` does **not** check the running image's OTA state, so
 unguarded it would roll back even a **confirmed** image whenever a rollback target exists — rebooting
 a healthy device that merely power-cycled during an outage and can't reach the broker within 300s.
@@ -288,7 +287,8 @@ CI (`scripts/check-automation-syntax.sh`) enforces this across `modules/` and `h
 esphome-sdk/
   README.md                     # this file — substitution contract, scope, versioning
   modules/                      # shared + optional-hardware modules
-  hardware/                     # hds_v1_0, hds_v1_1, hds_v2_0
+  hardware/                     # per-board files: hds_v1_0/1_1/2_0 (arduino) + *_idf variants,
+                                #   the hds_v1_1_sw1 opt-in unit, and each board's slot pin table
   components/                   # ESPHome custom components (C++)
   tests/validate/               # minimal configs exercised by CI (see tests/validate/README.md)
   tests/negative/               # configs that MUST fail (missing required substitutions)
@@ -308,7 +308,9 @@ esphome-sdk/
   resolves to that tag, and runs a real `esphome compile` over `tests/validate/` — so no version is
   ever published without every shipped component having been built at least once.
 
-ESPHome is pinned to **2026.5.1** in CI, matching what the builder sidecar installs.
+CI validates against ESPHome **2026.5.1** (pinned in `validate.yml` / `release.yml`). This is the
+version the SDK is checked and compiled against; it is not a claim about which ESPHome version any
+build service installs.
 
 ## Modules
 
@@ -348,9 +350,9 @@ CI compiles the C++ at least once per release.
 - **`tca8418.yaml` — TCA8418 I2C GPIO expander.** `TCA8418Component` extends
   `gpio_expander::CachedGpioExpander<uint32_t, 32>` and registers `TCA8418GPIOPin` as a real
   `GPIOPin`, adding 18 pins (ROW0–ROW7, COL0–COL9) over I2C that any component can use as a pin
-  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, not an
-  escape-room prop, and unrelated to ESPHome's native `matrix_keypad`/`key_collector` (those *scan*
-  a keypad matrix; this *provides* pins). **Import it when** a board runs short on native GPIO. The
+  source — a `binary_sensor`/`switch` on `platform: gpio`, etc. A general capability, unrelated to
+  ESPHome's native `matrix_keypad`/`key_collector` (those *scan* a keypad matrix; this *provides*
+  pins). **Import it when** a board runs short on native GPIO. The
   component AUTO_LOADs `gpio_expander` and DEPENDS on `i2c`, so the device must also declare an
   `i2c:` bus. Instantiate `tca8418:` with the board's address, then reference a pin as
   `pin: {tca8418: <id>, number: 0-17, mode: {...}}`.
@@ -361,32 +363,34 @@ CI compiles the C++ at least once per release.
   `uart:` bus **with a tx pin** (the Sprite receives commands on tx). Instantiate `medeawiz:` on
   that bus and use its actions (`medeawiz.play_file`, `medeawiz.seek`, …) and triggers
   (`on_file`, `on_end_of_file`).
-- **`phone.yaml` — matrix-keypad "phone" prop driver.** Scans a keypad matrix (or individual column
+- **`phone.yaml` — matrix-keypad "phone" keypad driver.** Scans a keypad matrix (or individual column
   buttons when no rows are given), debounces presses, tracks on/off-hook from an optional
   `binary_sensor`, and matches typed sequences against configured passwords, firing right/wrong
   triggers. No ESPHome-native component does this. **Import it when** the device drives a keypad
-  "phone" prop. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
+  "phone" device. Instantiate `phone:` with the concrete `rows`/`columns` pins (plain `GPIOPin`s — so
   they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
-  rows × columns), and any hook sensor / passwords / automations the prop needs.
+  rows × columns), and any hook sensor / passwords / automations the device needs.
 
 ### Hardware modules
 
 A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board, variant
-and framework are **concrete** — never `${DEVICE_BOARD}`/`${DEVICE_VARIANT}` templating. A device
-imports exactly one hardware module. The ESP32-only scope excludes the legacy `mr60bha2dev`, `r`,
-`esp12` and `nodemcu32` boards.
+and framework are **concrete** — never a `${...}` board/variant/framework substitution. A device
+imports exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r`, `esp12`
+and `nodemcu32` boards.
 
 | Module | board | variant | framework | board revision |
 |---|---|---|---|---|
 | `hds_v1_0.yaml` | `pico32` | `esp32` | `arduino` | v1.0 |
+| `hds_v1_0_idf.yaml` | `pico32` | `esp32` | `esp-idf` | v1.0 |
 | `hds_v1_1.yaml` | `esp32dev` | `esp32` | `arduino` | v1.1 |
+| `hds_v1_1_idf.yaml` | `esp32dev` | `esp32` | `esp-idf` | v1.1 |
 | `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `arduino` | v2.0 (ESP32-S3) |
+| `hds_v2_0_idf.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `esp-idf` | v2.0 (ESP32-S3) |
 
 - `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
-- `hds_v1_1.yaml` — on-board push button SW1 on GPIO1 and the CAN termination resistor on GPIO12.
-  SW1 presses the standard `controls.yaml` buttons (`button_restart` on a short click,
-  `button_factory` on longer holds), so a device with this board imports `controls.yaml`.
-- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board declared no on-board I/O.
+- `hds_v1_1.yaml` — the CAN termination resistor on GPIO12. The on-board SW1 button is **not** wired
+  here (see "SW1 / GPIO1" below).
+- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board has no fixed on-board I/O.
 
 **CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
 termination resistor and own an optional `can_resistor_status` substitution (default `ALWAYS_ON`)
@@ -397,5 +401,51 @@ and the bus is corrupted. The two v1 validate fixtures exercise both values — 
 
 **OTA visual feedback / LED ownership.** If a hardware file has indicator LEDs it owns its own OTA
 visual feedback and drives those LED ids itself — no module reaches into a hardware id. None of
-these three boards has indicator LEDs, so none ships OTA LED feedback and `ota.yaml` keeps no
-reference to any hardware id.
+these boards has indicator LEDs, so none ships OTA LED feedback and `ota.yaml` keeps no reference to
+any hardware id.
+
+#### esp-idf framework variants
+
+Framework is a **concrete** value, so each board ships as two separate files rather than a templated
+`framework:` — an arduino build (`hds_v1_0.yaml`) and an esp-idf build (`hds_v1_0_idf.yaml`), and a
+device imports exactly one. The `_idf` file reuses its arduino sibling wholesale (same board, variant
+and the full slot pin table) and overrides **only** `esp32.framework` to `esp-idf`, so the two can
+never drift.
+
+The framework choice has one behavioural consequence in the shared modules: `ota.yaml`'s post-boot
+**rollback watchdog is compiled inside `#ifdef USE_ESP_IDF`**. So on an **arduino** build it is
+compiled out entirely (there is no ESP-IDF rollback API on that path) and carries no protection; on
+an **esp-idf** build it is active and guards a freshly-flashed image (see the OTA rollback section).
+A device that needs the post-OTA rollback safety must therefore be on an esp-idf board file. The
+`*_idf` validate fixtures compile that guard on release.
+
+#### SW1 / GPIO1 — opt-in, because it silences serial logging
+
+The v1.1 board has an on-board push button, SW1, on **GPIO1** — which is the ESP32's **U0TXD**
+(primary UART TX). Configuring SW1 as a GPIO input takes GPIO1 away from the UART, so **the serial
+console goes silent** on that board. Because that trade-off must be a deliberate choice, SW1 is **not**
+wired in the board file; it lives in the importable unit **`hardware/hds_v1_1_sw1.yaml`**. To use the
+button, a device imports `hds_v1_1_sw1.yaml` **and** `controls.yaml` (SW1's `on_click` presses
+`button_restart` on a short click and `button_factory` on longer holds). To keep serial logs on the
+board instead, simply **do not** import `hds_v1_1_sw1.yaml` — GPIO1 stays on the UART. A substitution
+cannot conditionally omit a YAML block, so the two-file split is what makes SW1 genuinely optional.
+
+#### Slot pin tables — `slot_<n>_<module>_<signal>`
+
+Each board file also carries a static table of **slot pin substitutions**. A board has a set of
+numbered module slots; a pluggable module wired into a slot exposes named signals; and each
+`slot_<n>_<module>_<signal>` substitution resolves that signal, for that module in that slot, to the
+physical GPIO it lands on. Names are `lower_snake_case`. For example, a Double Relay wired into slot 3
+uses `${slot_3_double_relay_relay_1}` for relay 1's pin; an Audio module's RX in slot 7 uses
+`${slot_7_audio_rx}`. Only combinations that physically fit a board are listed, and each board's table
+is board-specific — the same module in the same slot resolves to different pins on different boards.
+
+The values are **static data**, transcribed from the board's slot/module definitions and cross-checked
+against them; there is no generator, codegen step or regeneration procedure in this repository. Which
+slot actually holds which module is the **consumer's** responsibility: the SDK never sees a device's
+populated slot map, so it **cannot** validate that `slot_3_double_relay_*` is used on a board whose
+slot 3 really holds a Double Relay. That cross-check — present in the legacy slot-map generator, which
+built each device config from an explicit populated slot map — is not reproduced here and becomes
+authoring discipline. `esphome config` still catches a **mistyped** name (its `${...}` stays a literal
+and fails the pin schema), which the `slot_pins_*` validate fixtures exercise — one substitution per
+module type per board — but it cannot catch a *wrong-but-valid* slot choice.
