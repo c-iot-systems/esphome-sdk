@@ -1,6 +1,6 @@
 # NEGATIVE — MUST FAIL. Omits mqtt_ca_certificate (required by criotive_mqtt.yaml); every other
-# required substitution is present. This is the ADR-0022 proof: without the CA the MQTT transport is
-# plaintext on port 8883, so the CA is required with no default and its omission must fail loudly.
+# required substitution is present. Without the CA the MQTT transport is plaintext on port 8883, so
+# the CA is required with no default and its omission must fail loudly.
 substitutions:
   device_name: neg-device
   firmware_version: "0.0.0-test"
