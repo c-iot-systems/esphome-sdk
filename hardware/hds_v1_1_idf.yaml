@@ -1,0 +1,22 @@
+# hds_v1_1_idf — the v1.1 board built on the esp-idf framework.
+#
+# Concrete hardware values are an invariant, so the framework is a real, separate file rather than a
+# ${...} substitution: this file reuses the arduino board file wholesale (same board, variant, CAN
+# resistor pin and the full slot pin table) and overrides ONLY esp32.framework to esp-idf. A device
+# imports either hds_v1_1.yaml (arduino) or this file (esp-idf), never both.
+#
+# The base is pulled in as a package so the pin table lives in exactly one place (hds_v1_1.yaml) and
+# the two framework variants can never drift. The top-level esp32: below merges OVER the base
+# package, replacing only framework.type while keeping board/variant.
+#
+# SW1 stays opt-in here too: this file does NOT wire GPIO1, so a device on esp-idf gets serial logs
+# unless it also imports hds_v1_1_sw1.yaml (see that file and the README).
+#
+# Framework consequence: the OTA rollback watchdog in ota.yaml is compiled inside #ifdef USE_ESP_IDF,
+# so it is ACTIVE on this esp-idf build (and compiled out of the arduino build). See the README.
+packages:
+  hardware_base: !include hds_v1_1.yaml
+
+esp32:
+  framework:
+    type: esp-idf
