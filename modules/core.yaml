@@ -102,11 +102,19 @@
 # Hardware constraint on the classic-ESP32 boards (hds_v1_0, hds_v1_1): UART0's TX is GPIO1 (U0TXD).
 # On hds_v1_1 that pin also drives the on-board SW1 button, so a serial console and SW1 are mutually
 # exclusive AT THE HARDWARE LEVEL — UART1/UART2's default pins are wired to flash on typical modules
-# and the logger schema exposes no tx_pin override. Because the console is OFF by default
-# (logger_baud_rate: 0), GPIO1 is free and SW1 works with no conflict out of the box; a classic board
-# that truly needs a serial console must give SW1 up (omit it or move its pin). On the ESP32-S3
-# hds_v2_0 there is no such conflict: set logger_hardware_uart: USB_SERIAL_JTAG with a real
-# logger_baud_rate and the console uses no UART pins.
+# and the logger schema exposes no tx_pin override. Raising logger_baud_rate does NOT free GPIO1: SW1
+# still owns the pin whenever the SW1 binary_sensor exists, so the baud rate is NOT the SW1 opt-out.
+# The opt-out is COMPOSITION: SW1 lives in the importable hds_v1_1_sw1.yaml, and a device that needs
+# serial logs simply omits that import (see hardware/hds_v1_1.yaml and the README):
+#   | Goal                | Import in the device config                       | logger_baud_rate  |
+#   |---------------------|---------------------------------------------------|-------------------|
+#   | normal device       | hds_v1_1.yaml + hds_v1_1_sw1.yaml + controls.yaml | 0 (default)       |
+#   | reading serial logs | hds_v1_1.yaml ONLY (omit the SW1 file)            | real, e.g. 115200 |
+# Because the SDK is a REMOTE git package, a device cannot edit or comment the board file to free
+# GPIO1; not-importing hds_v1_1_sw1.yaml is that "comment out", made in the device's own config. On
+# the ESP32-S3 hds_v2_0 the trade-off does not arise: set logger_hardware_uart: USB_SERIAL_JTAG with
+# a real logger_baud_rate and the console uses the built-in USB peripheral — no UART pins — so a
+# GPIO1 button and the console can coexist without the two-file split.
 #
 # framework_variant selects the esp32 build framework a hardware file compiles against. It is a
 # substitution rather than a doubled board file: a hardware file keeps its CONCRETE board and variant

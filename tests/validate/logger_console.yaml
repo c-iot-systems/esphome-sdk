@@ -8,8 +8,10 @@
 # The S3 is the board where a serial console and a GPIO button can coexist: USB_SERIAL_JTAG uses the
 # built-in USB peripheral, not UART pins, so no board GPIO is taken. On the classic-ESP32 boards
 # (hds_v1_0 / hds_v1_1) UART0's TX is GPIO1 — the same pin hds_v1_1's SW1 uses — so a console and SW1
-# are mutually exclusive there at the hardware level (see modules/core.yaml and the README); that
-# constraint is why this console fixture rides the S3.
+# are mutually exclusive there at the hardware level, and the way out is composition: a device omits
+# the hds_v1_1_sw1.yaml import to free GPIO1 (see modules/core.yaml and the README). The classic
+# console-on / no-SW1 path is covered by the hds_v1_1.yaml fixture; this fixture rides the S3, where
+# no such split is needed.
 #
 # CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
 # the package ref and every vars.sdk_ref are the placeholder.
