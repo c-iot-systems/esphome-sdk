@@ -12,15 +12,24 @@
 # Fixed pin map:
 #   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
 #
-# ── SW1 is opt-in, and is NOT wired here ──────────────────────────────────────────────────────
-# This board has an on-board push button (SW1) on GPIO1. GPIO1 is the ESP32's U0TXD line, so
-# configuring SW1 as a GPIO input takes over the primary UART's TX pin and silences serial-console
-# logging on the board. That trade-off must be a deliberate per-device choice, so SW1 is NOT wired
-# in this board file — it lives in the importable unit hds_v1_1_sw1.yaml. A device that wants the
-# button imports that file (and controls.yaml, whose buttons SW1 presses); a device that wants
-# serial logs simply does not, and GPIO1 stays free. A substitution cannot conditionally omit a YAML
-# block, so the split into a second file is the only way to make the button genuinely optional. See
-# the README's "SW1 / GPIO1" note.
+# ── SW1 — on-board push button on GPIO1 ───────────────────────────────────────────────────────
+# SW1 is wired below (binary_sensor). Its on_click presses button_restart / button_factory — a
+# short click restarts, longer holds factory-reset — which controls.yaml owns, so a device that
+# imports this board MUST also import controls.yaml or the id references do not resolve. on_click
+# uses the explicit list form (three separate click-length windows, each its own automation) so
+# package merging keeps all three rather than collapsing them into one — see the
+# automation-list-syntax gate.
+#
+# GPIO1 / serial console — a HARDWARE constraint, not a configuration choice. GPIO1 is the ESP32's
+# U0TXD (primary UART TX), so on this classic-ESP32 board SW1 and a serial console are mutually
+# exclusive at the hardware level: driving SW1 as a GPIO input takes GPIO1 away from the UART, and
+# there is no way to keep both. The SDK ships the serial console OFF by default (logger_baud_rate: 0
+# in modules/core.yaml skips UART init entirely), so GPIO1 is free and SW1 works with NO conflict out
+# of the box. Raising serial logs on this board therefore means giving SW1 up: UART1/UART2's default
+# pins are wired to flash on typical modules and the logger schema exposes no tx_pin override, so a
+# device that truly needs a serial console must omit SW1 or move its pin. (On the ESP32-S3 hds_v2_0
+# board both work — its console can use USB_SERIAL_JTAG, which needs no UART pins; see
+# modules/core.yaml and the README.)
 #
 # can_resistor_status selects the CAN termination restore mode. Only the two endpoint nodes of a CAN
 # segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
@@ -214,6 +223,33 @@ esp32:
       # the SDK's watchdog + MQTT confirm are #ifdef USE_ESP_IDF, so an arduino device MUST pair
       # framework_variant: arduino with ota_rollback: false — see hds_v1_0.yaml / core.yaml / README.
       enable_ota_rollback: ${ota_rollback}
+
+binary_sensor:
+  - platform: gpio
+    pin: 1
+    name: "SW1"
+    internal: true
+    filters:
+      - invert
+    on_click:
+      - min_length: 100ms
+        max_length: 2s
+        then:
+          - logger.log: "Rebooting"
+          - delay: 1s
+          - button.press: button_restart
+      - min_length: 2s
+        max_length: 10s
+        then:
+          - logger.log: "WiFi Manager"
+          - delay: 1s
+          - button.press: button_factory  # TODO: start captive instead.
+      - min_length: 20s
+        max_length: 1000s
+        then:
+          - logger.log: "Factory"
+          - delay: 1s
+          - button.press: button_factory
 
 switch:
   - platform: gpio

@@ -19,6 +19,8 @@
 #   | firmware_version     | yes      | —       | core.yaml          | published as a text sensor   |
 #   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
 #   | logger_level         | no       | NONE    | core.yaml          | prod-off; raise deliberately |
+#   | logger_baud_rate     | no       | 0       | core.yaml          | 0 = serial console OFF (skips UART init) |
+#   | logger_hardware_uart | no       | UART0   | core.yaml          | logger UART; S3 adds USB_CDC/USB_SERIAL_JTAG |
 #   | framework_variant    | no       | esp-idf | core.yaml          | esp32 framework: esp-idf|arduino |
 #   | ota_rollback         | no       | true    | core.yaml          | esp32 enable_ota_rollback; set false w/ arduino |
 #   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
@@ -87,6 +89,25 @@
 # SDK shipping every device chatty by default. A chatty default is not free: it costs flash, CPU and
 # (when a device also publishes logs) broker traffic on every unit that forgot to turn it down.
 #
+# logger_baud_rate and logger_hardware_uart control the SERIAL console, independently of
+# logger_level. logger_baud_rate defaults to "0", which turns the serial console OFF: ESPHome
+# 2026.5.1 guards UART init with `if (this->baud_rate_ > 0)` (components/logger/logger_esp32.cpp),
+# so 0 skips UART setup entirely and leaves the UART pins free — and `positive_int = int_range(min=0)`
+# means 0 still validates. logger_hardware_uart selects which UART the console uses; it defaults to
+# UART0 (valid on every ESP32 variant) and additionally accepts USB_CDC / USB_SERIAL_JTAG on the
+# ESP32-S3 (hds_v2_0). The two knobs are INDEPENDENT: logger_level gates which records are ever
+# produced, logger_baud_rate gates whether a UART console exists to print them on — so raising serial
+# logs takes BOTH a non-NONE logger_level AND a non-zero logger_baud_rate.
+#
+# Hardware constraint on the classic-ESP32 boards (hds_v1_0, hds_v1_1): UART0's TX is GPIO1 (U0TXD).
+# On hds_v1_1 that pin also drives the on-board SW1 button, so a serial console and SW1 are mutually
+# exclusive AT THE HARDWARE LEVEL — UART1/UART2's default pins are wired to flash on typical modules
+# and the logger schema exposes no tx_pin override. Because the console is OFF by default
+# (logger_baud_rate: 0), GPIO1 is free and SW1 works with no conflict out of the box; a classic board
+# that truly needs a serial console must give SW1 up (omit it or move its pin). On the ESP32-S3
+# hds_v2_0 there is no such conflict: set logger_hardware_uart: USB_SERIAL_JTAG with a real
+# logger_baud_rate and the console uses no UART pins.
+#
 # framework_variant selects the esp32 build framework a hardware file compiles against. It is a
 # substitution rather than a doubled board file: a hardware file keeps its CONCRETE board and variant
 # but consumes ${framework_variant} inside its own esp32.framework.type (see hardware/hds_*.yaml),
@@ -115,6 +136,8 @@
 # esp-idf, exactly as the README states.
 substitutions:
   logger_level: NONE
+  logger_baud_rate: "0"          # serial console OFF by default -> GPIO1 stays free
+  logger_hardware_uart: UART0
   framework_variant: esp-idf
   ota_rollback: "true"
 
@@ -149,6 +172,8 @@ preferences:
 
 logger:
   level: ${logger_level}
+  baud_rate: ${logger_baud_rate}
+  hardware_uart: ${logger_hardware_uart}
 
 time:
   - platform: sntp
