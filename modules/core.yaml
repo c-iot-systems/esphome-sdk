@@ -1,173 +1,20 @@
-# core.yaml — the criotive SDK substitution contract + the mandatory device foundation.
-#
-# core.yaml is the one documented place answering "what must every firmware supply?". It is
-# MANDATORY for every device and imports NOTHING: a consumer enumerates exactly the modules it
-# needs, because "a device compiles only what it imports" is the whole point of the split. A core
-# that pulled in wifi/mqtt/ota would make every device pay for all of them.
-#
-# ── Substitution contract ────────────────────────────────────────────────────────────────────
-# Everything is a YAML substitution (never a C++ preprocessor define — nothing in the build path
-# passes compiler defines). Names are lower_snake_case. "Required" is scoped to the OWNING module: importing
-# a module makes its inputs required; core.yaml never makes another module's inputs globally
-# mandatory. No credential substitution has a default — a default password in a public repo is a
-# default password in every device that forgot to override it, so a missing credential must fail
-# validation loudly.
-#
-#   | Substitution         | Required | Default | Owner              | Notes                        |
-#   |----------------------|----------|---------|--------------------|------------------------------|
-#   | device_name          | yes      | —       | core.yaml          | node name; MQTT topic prefix |
-#   | firmware_version     | yes      | —       | core.yaml          | published as a text sensor   |
-#   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
-#   | logger_level         | no       | NONE    | core.yaml          | prod-off; raise deliberately |
-#   | logger_baud_rate     | no       | 0       | core.yaml          | 0 = serial console OFF (skips UART init) |
-#   | logger_hardware_uart | no       | UART0   | core.yaml          | logger UART; S3 adds USB_CDC/USB_SERIAL_JTAG |
-#   | framework_variant    | no       | esp-idf | core.yaml          | esp32 framework: esp-idf|arduino |
-#   | ota_rollback         | no       | true    | core.yaml          | esp32 enable_ota_rollback; set false w/ arduino |
-#   | wifi_ssid            | no       | (empty) | wifi.yaml          | station slot 1               |
-#   | wifi_password        | no       | (empty) | wifi.yaml          | required once slot 1 has ssid|
-#   | wifi_ssid_2          | no       | (empty) | wifi.yaml          | station slot 2               |
-#   | wifi_password_2      | no       | (empty) | wifi.yaml          | required once slot 2 has ssid|
-#   | wifi_ssid_3          | no       | (empty) | wifi.yaml          | station slot 3               |
-#   | wifi_password_3      | no       | (empty) | wifi.yaml          | required once slot 3 has ssid|
-#   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
-#   | wifi_reboot_timeout  | no       | 0s      | wifi.yaml          | 0s = reboot DISABLED (offline) |
-#   | mqtt_broker          | yes      | —       | criotive_mqtt.yaml |                              |
-#   | mqtt_ca_certificate  | yes      | —       | criotive_mqtt.yaml | TLS trust anchor; no default |
-#   | mqtt_port            | yes      | —       | criotive_mqtt.yaml | no default; port alone does NOT enable TLS |
-#   | mqtt_username        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
-#   | mqtt_password        | yes      | —       | criotive_mqtt.yaml | no default, ever             |
-#   | mqtt_client_id       | no       | ${device_name} | criotive_mqtt.yaml | MQTT client id; some brokers require id==username |
-#   | mqtt_reboot_timeout  | no       | 0s      | criotive_mqtt.yaml | 0s = reboot DISABLED (offline) |
-#   | mqtt_discovery       | no       | true    | criotive_mqtt.yaml | Home Assistant discovery     |
-#   | ota_password         | yes      | —       | ota.yaml           | no default, ever             |
-#   | ota_attempts         | no       | 50      | ota.yaml           | safe-mode boot attempts      |
-#   | ota_http_server      | yes      | —       | ota.yaml           | HTTPS OTA download host       |
-#
-# sdk_ref: threaded through ESPHome's per-file `vars:` to EVERY module, because ESPHome does not
-# propagate a package `ref` into a module's own `external_components:` block. core.yaml and wifi.yaml
-# carry no components, so they do not otherwise consume ${sdk_ref}, but core.yaml GUARDS it (in
-# esphome.comment below) so a consumer that forgets `vars: {sdk_ref: ...}` fails validation — it is
-# required, not merely conventional. check-sdk-ref.sh additionally enforces that every validate
-# fixture threads the same ref into the package `ref` and each module's `vars.sdk_ref`.
-#
-# ── Offline-survival invariant (product requirement — do NOT weaken) ──────────────────────────
-# A device MUST keep operating indefinitely while offline, WITHOUT rebooting. Field devices on
-# unreliable uplinks must ride out an outage rather than reboot through it. Therefore
-# wifi_reboot_timeout AND mqtt_reboot_timeout DEFAULT TO 0s, which disables the
-# respective connectivity reboot OUTRIGHT — verified against ESPHome 2026.5.1 source, both components
-# guard App.reboot() with `reboot_timeout_ != 0` (wifi/wifi_component.cpp:867, mqtt/mqtt_client.cpp:418),
-# so set_reboot_timeout(0) makes the reboot branch unreachable. ESPHome's stock default is 15min for
-# both; the SDK pins 0s. No module may (re)introduce a connectivity-driven reboot — this
-# includes ota.yaml's rollback watchdog, which is gated on ESP_OTA_IMG_PENDING_VERIFY so a confirmed,
-# long-offline image is never rolled back (see ota.yaml). scripts/check-offline-survival.sh (wired
-# into validate.yml) fails the build if any reboot_timeout default under modules/ or hardware/ is
-# non-zero, so this cannot silently regress again.
-#
-# "Never auto-publish" is expressed with ESPHome's `update_interval: never` literal at every such
-# site (firmware_version, sensor_boots, ota_status, google_location), which is strictly clearer than a
-# magic maximum-interval number like 4294967295ms. No magic max-interval / max-value sentinel is
-# reintroduced as a substitution. Future entities should use `never`.
-#
-# This module OWNS: esphome:, device identity, the firmware_version text sensor, the boot counter,
-# preferences, logger and sntp time. Optional inputs it owns (logger_level) get a default below;
-# required inputs it owns (device_name, firmware_version) are referenced with NO default.
-#
-# ── How "required" is enforced ───────────────────────────────────────────────────────────────
-# ESPHome 2026.5.1 does NOT hard-fail on an undefined substitution: the substitution pass runs
-# non-strict (components/substitutions/__init__.py — do_substitution_pass calls substitute(...,
-# strict_undefined=False)), so a missing `${x}` only logs a WARNING and leaves the literal in
-# place. `esphome config` then exits 0 unless that leftover literal happens to break a field's
-# schema. So referencing a substitution is NOT enough to make it required.
-#   - device_name lands in `esphome: name:`, whose identifier schema rejects the leftover
-#     `${device_name}` literal, so omitting it already fails — no extra guard needed.
-#   - firmware_version, sdk_ref (esphome.comment, below) and wifi.yaml's AP password land in
-#     free-form string fields that accept the literal, so each is wrapped in the guard
-#     `${ x if x is defined else 1/0 }`: when the value is present the expression returns it
-#     unchanged; when it is missing the ZeroDivisionError surfaces as a hard `cv.Invalid` (the
-#     non-strict pass demotes UndefinedError to a warning but re-raises every other expression
-#     error), so `esphome config` exits non-zero with the offending expression — which names the
-#     variable — in the message. tests/negative/ proves each case.
-
-# logger_level defaults to NONE — the production posture. The default ships silent and a consumer
-# raises it DELIBERATELY per device — logger_level: INFO (or DEBUG/VERBOSE/VERY_VERBOSE) — never the
-# SDK shipping every device chatty by default. A chatty default is not free: it costs flash, CPU and
-# (when a device also publishes logs) broker traffic on every unit that forgot to turn it down.
-#
-# logger_baud_rate and logger_hardware_uart control the SERIAL console, independently of
-# logger_level. logger_baud_rate defaults to "0", which turns the serial console OFF: ESPHome
-# 2026.5.1 guards UART init with `if (this->baud_rate_ > 0)` (components/logger/logger_esp32.cpp),
-# so 0 skips UART setup entirely and leaves the UART pins free — and `positive_int = int_range(min=0)`
-# means 0 still validates. logger_hardware_uart selects which UART the console uses; it defaults to
-# UART0 (valid on every ESP32 variant) and additionally accepts USB_CDC / USB_SERIAL_JTAG on the
-# ESP32-S3 (hds_v2_0). The two knobs are INDEPENDENT: logger_level gates which records are ever
-# produced, logger_baud_rate gates whether a UART console exists to print them on — so raising serial
-# logs takes BOTH a non-NONE logger_level AND a non-zero logger_baud_rate.
-#
-# Hardware constraint on the classic-ESP32 boards (hds_v1_0, hds_v1_1): UART0's TX is GPIO1 (U0TXD).
-# On hds_v1_1 that pin also drives the on-board SW1 button, so a serial console and SW1 are mutually
-# exclusive AT THE HARDWARE LEVEL — UART1/UART2's default pins are wired to flash on typical modules
-# and the logger schema exposes no tx_pin override. Raising logger_baud_rate does NOT free GPIO1: SW1
-# still owns the pin whenever the SW1 binary_sensor exists, so the baud rate is NOT the SW1 opt-out.
-# The opt-out is the compile-time hds_v1_1_sw1_enabled flag (default true): set it false to drop SW1
-# and free GPIO1 for the console (see hardware/hds_v1_1.yaml and the README):
-#   | Goal                | hds_v1_1_sw1_enabled | logger_baud_rate  |
-#   |---------------------|----------------------|-------------------|
-#   | normal device       | true (default)       | 0 (default)       |
-#   | reading serial logs | false (UNQUOTED)     | real, e.g. 115200 |
-# Because the SDK is a REMOTE git package, a device cannot edit or comment the board file to free
-# GPIO1; the flag, set in the device's own config, is that "comment out". It is compile-time, not
-# live multiplexing. On the ESP32-S3 hds_v2_0 the trade-off does not arise: set
-# logger_hardware_uart: USB_SERIAL_JTAG with a real logger_baud_rate and the console uses the
-# built-in USB peripheral — no UART pins — so a GPIO1 button and the console can coexist.
-#
-# framework_variant selects the esp32 build framework a hardware file compiles against. It is a
-# substitution rather than a doubled board file: a hardware file keeps its CONCRETE board and variant
-# but consumes ${framework_variant} inside its own esp32.framework.type (see hardware/hds_*.yaml),
-# so one board file serves both frameworks and the two can never drift. core.yaml declares only the
-# DEFAULT here — it does NOT declare an esp32: block (board, variant and framework are one logical
-# block owned by the hardware file). The valid tokens are the two ESPHome esp32 framework names,
-# esp-idf and arduino. The default is esp-idf: on esp-idf the ota.yaml post-boot rollback watchdog
-# (#ifdef USE_ESP_IDF) is compiled in, so a default build ships the OTA rollback protection; a
-# device that wants the arduino toolchain overrides framework_variant: arduino per device and gives
-# that protection up — and MUST also set ota_rollback: false (see the next paragraph and the README
-# OTA + framework sections).
-#
-# ota_rollback feeds the hardware file's esp32.framework.advanced.enable_ota_rollback. It MUST be
-# paired with framework_variant: keep the default `true` for esp-idf, and set BOTH
-# framework_variant: arduino AND ota_rollback: false for an arduino device. Why it is a separate knob
-# and not simply left at ESPHome's own default: ESPHome 2026.5.1 emits USE_OTA_ROLLBACK +
-# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE for enable_ota_rollback on BOTH frameworks (esp32/__init__.py
-# to_code, the `if advanced[CONF_ENABLE_OTA_ROLLBACK]` block is at base indent, not under the
-# esp-idf-only branch). USE_OTA_ROLLBACK makes esp32/hal.cpp defer boot-time image confirmation to
-# safe_mode and arms bootloader rollback — but the SDK's watchdog and MQTT confirmation are both
-# #ifdef USE_ESP_IDF, so on arduino they are compiled out. Leaving rollback enabled on arduino would
-# therefore defer confirmation to a 330s timer with no broker cancel and no watchdog, letting a
-# healthy freshly-flashed image that reboots inside that window be rolled back by the bootloader.
-# Setting ota_rollback: false on arduino leaves USE_OTA_ROLLBACK undefined, so hal.cpp confirms the
-# image immediately at boot and no rollback machinery exists — rollback protection lives ONLY on
-# esp-idf, exactly as the README states.
 substitutions:
   logger_level: NONE
-  logger_baud_rate: "0"          # serial console OFF by default -> GPIO1 stays free
+  logger_baud_rate: "0" # Serial off by default; frees GPIO1.
   logger_hardware_uart: UART0
   framework_variant: esp-idf
+  # Arduino builds must set this to "false".
   ota_rollback: "true"
 
 esphome:
   name: ${device_name}
-  # Records AND enforces the SDK ref this firmware was built from. sdk_ref is threaded through the
-  # per-file `vars:` a consumer passes to every module (ESPHome does not propagate a package ref
-  # into a module's own external_components). core.yaml carries no components, so nothing else here
-  # consumes it — guarding it in this mandatory module is what makes a consumer that forgets
-  # `vars: {sdk_ref: ...}` fail `esphome config` (see the guard-idiom note above), and it doubles as
-  # build provenance in the generated config.
+  # The 1/0 guard makes a missing required value fail validation.
   comment: "criotive SDK ${ sdk_ref if sdk_ref is defined else 1/0 }"
   on_boot:
     - priority: 600
       then:
         - text_sensor.template.publish:
             id: firmware_version
-            # Guarded: present -> the version; missing -> hard `esphome config` failure (see header).
             state: "${ firmware_version if firmware_version is defined else 1/0 }"
         - lambda: |-
             id(boots_global)++;

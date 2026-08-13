@@ -1,38 +1,3 @@
-# hds_v2_0 — concrete board definition + pin map for the v2.0 board (ESP32-S3).
-#
-# Board and variant are CONCRETE (esp32-s3-devkitc-1 / esp32s3) — never ${DEVICE_BOARD}/
-# ${DEVICE_VARIANT} templating. The build FRAMEWORK is the one esp32 field that varies per device, so
-# it is consumed as ${framework_variant} (default esp-idf, declared in modules/core.yaml) inside this
-# file's own esp32.framework — one board file serves both the esp-idf and arduino builds instead of a
-# doubled _idf sibling. A device selects the arduino toolchain with framework_variant: arduino.
-#
-# The v2.0 board declares no fixed board I/O: no CAN termination switch, no on-board button and no
-# indicator LEDs, so this file owns no board-level component and no OTA visual feedback. It DOES
-# carry module slots, so the slot pin table below applies.
-#
-# ── Serial console / logger ───────────────────────────────────────────────────────────────────
-# The serial console is OFF by default (modules/core.yaml sets logger_baud_rate: 0, which skips UART
-# init). Unlike the classic-ESP32 boards this ESP32-S3 has no serial-console-vs-GPIO conflict: set
-# logger_hardware_uart: USB_SERIAL_JTAG (an S3-only option) together with a real, non-zero
-# logger_baud_rate and a non-NONE logger_level, and the console uses the built-in USB peripheral — no
-# UART pins — so no board GPIO is taken. logger_level and logger_baud_rate stay independent (level
-# gates record production, baud_rate gates console init); see modules/core.yaml.
-#
-# On the classic boards a GPIO1 button and the console cannot coexist, so hds_v1_1 gates its SW1 on
-# the compile-time hds_v1_1_sw1_enabled flag and a device sets it false to read logs (see
-# hardware/hds_v1_1.yaml and the README). The S3 needs no such gate: because USB_SERIAL_JTAG frees
-# GPIO1 entirely, a GPIO1 button could keep its pin WHILE the console is on. (This board declares no
-# on-board button, so the point is only that the trade-off simply does not arise on the S3.)
-#
-# ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
-# This board carries seven module slots. Each substitution below resolves ONE module signal, for a
-# given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that
-# wires, say, a Double Relay into slot 3 references ${slot_3_double_relay_relay_1} as that relay's
-# pin. The values are static: they were read directly from the board's slot/module data (the physical
-# per-slot GPIO table and each module's signal-to-lane mapping) and only combinations that physically
-# fit the board are listed. The SDK CANNOT check that a slot actually holds the module a name refers
-# to — it never sees a device's populated slot map — so choosing the right name for the module a slot
-# really holds is the consumer's responsibility (see the README).
 substitutions:
   slot_1_triple_digital_input_in1: "7"
   slot_1_triple_digital_input_in2: "8"
@@ -143,15 +108,7 @@ esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
   framework:
-    # Board and variant are concrete; only the framework varies per device. Default esp-idf (see
-    # modules/core.yaml); override framework_variant: arduino to build against arduino. Substitution
-    # runs before schema validation, so ${framework_variant} resolves to a literal the esp32 schema
-    # then checks — the same pattern can_resistor_status already uses.
     type: ${framework_variant}
     advanced:
-      # OTA rollback support, driven by ${ota_rollback} (default true). On esp-idf this defines
-      # USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, deferring boot-time confirmation to
-      # safe_mode (the deferral ota.yaml's watchdog needs). ESPHome emits it on BOTH frameworks, but
-      # the SDK's watchdog + MQTT confirm are #ifdef USE_ESP_IDF, so an arduino device MUST pair
-      # framework_variant: arduino with ota_rollback: false — see hds_v1_0.yaml / core.yaml / README.
+      # Arduino builds require ota_rollback: "false".
       enable_ota_rollback: ${ota_rollback}

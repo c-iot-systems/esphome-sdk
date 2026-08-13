@@ -1,14 +1,3 @@
-# Positive validate fixture — core.yaml + wifi.yaml with ALL THREE station slots filled. Proves the
-# networks expression emits one entry per slot in order, so a device can carry more than one
-# candidate uplink without a rebuild. CI materializes __SDK_REF__ (see tests/validate/README.md)
-# into the PR head SHA before running, so the branch's own modules are fetched from GitHub.
-#
-# Self-contained: literal test values for every substitution. The repo is public, so no value here
-# is a real credential.
-#
-# Companion fixtures: core_wifi.yaml (slot 1 only — the common single-network device) and
-# core_wifi_provisioning_only.yaml (no slot filled). Together the three cover every shape the
-# networks expression can produce.
 substitutions:
   device_name: core-wifi-multi-testdev
   firmware_version: "0.0.0-test"
@@ -20,7 +9,6 @@ substitutions:
   wifi_password_3: test-wifi-password-3
   wifi_ap_password: test-ap-password
 
-# Inline hardware stub — SDK-2 owns no hardware module, so the fixture supplies the platform itself.
 esp32:
   board: esp32dev
   framework:

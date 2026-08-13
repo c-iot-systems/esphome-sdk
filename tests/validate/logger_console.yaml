@@ -1,27 +1,6 @@
-# Positive validate fixture for the serial-console logger knobs. It imports the hds_v2_0 board
-# (ESP32-S3) plus core + wifi + criotive_mqtt + ota + diagnostics + controls at the REVISION UNDER
-# TEST, and must pass `esphome config`. Its job is to exercise logger_baud_rate and
-# logger_hardware_uart at NON-DEFAULT values so the two new substitutions are validated, not merely
-# declared: the other fixtures leave the console off (logger_baud_rate: 0, hardware_uart: UART0), so
-# this one turns it ON — a real baud_rate and the S3-only USB_SERIAL_JTAG UART.
-#
-# The S3 is the board where a serial console and a GPIO button can coexist: USB_SERIAL_JTAG uses the
-# built-in USB peripheral, not UART pins, so no board GPIO is taken. On the classic-ESP32 boards
-# (hds_v1_0 / hds_v1_1) UART0's TX is GPIO1 — the same pin hds_v1_1's SW1 uses — so a console and SW1
-# are mutually exclusive there at the hardware level, and the way out is the compile-time
-# hds_v1_1_sw1_enabled flag: a device sets it false to drop SW1 and free GPIO1 (see modules/core.yaml
-# and the README). The classic console-on / SW1-off path is covered by the hds_v1_1.yaml fixture; this
-# fixture rides the S3, where no such gate is needed.
-#
-# CI materializes the __SDK_REF__ placeholder (see tests/validate/README.md); check-sdk-ref.sh asserts
-# the package ref and every vars.sdk_ref are the placeholder.
-#
-# Self-contained: literal test values for every required substitution. The repo is public, so no value
-# here is a real credential — mqtt_ca_certificate is a stand-in, not a real CA.
 substitutions:
   device_name: logger-console-testdev
   firmware_version: "0.0.0-test"
-  # Turn the serial console ON at non-default values so both new knobs are validated.
   logger_level: INFO
   logger_baud_rate: "115200"
   logger_hardware_uart: USB_SERIAL_JTAG

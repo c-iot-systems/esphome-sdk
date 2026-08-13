@@ -1,19 +1,3 @@
-# location.yaml — Wi-Fi-scan geolocation via the google_location text sensor.
-#
-# Owns: the `google_location` text sensor, its own `external_components` source, and the
-# "Location Request" button that triggers an on-demand scan. Opt-in; imports nothing. google_location
-# is a SHARED capability available to any device.
-#
-# ── The component ref is threaded through ${sdk_ref} ──────────────────────────────────────────
-# ESPHome treats `packages:` and `external_components:` as INDEPENDENT git sources: fetching this
-# module at `@<ref>` does NOT pass that ref to the external_components block below. So the source is
-# pinned to `${sdk_ref}` — the per-file `vars:` the consumer threads to every module — and the C++
-# component is fetched at the SAME revision as this YAML. A hard-coded ref here would let the C++
-# silently follow the default branch while the YAML is pinned; check-sdk-ref.sh enforces `${sdk_ref}`.
-#
-# The google_location component lives in this repo under components/google_location and is fetched
-# from git (pinned to ${sdk_ref}), so the module is self-contained for a remote consumer.
-
 external_components:
   - source:
       type: git
@@ -25,14 +9,9 @@ text_sensor:
   - platform: google_location
     name: "Google location"
     id: id_google_location
-    # A PollingComponent; `never` disables the periodic poll — location is refreshed on demand through
-    # the button below, not on a timer.
     update_interval: never
 
 button:
-  # On-demand location refresh — a standard `template` button. It lives with the component it drives,
-  # so importing controls.yaml never pulls in google_location. Explicit list syntax on on_press (the
-  # automation-list-syntax invariant).
   - platform: template
     name: "Location Request"
     id: button_google_location
