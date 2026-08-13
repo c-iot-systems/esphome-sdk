@@ -208,11 +208,12 @@ esp32:
     # then checks — the same pattern can_resistor_status already uses.
     type: ${framework_variant}
     advanced:
-      # Pin OTA rollback support ON so the ota.yaml watchdog stays armed on esp-idf (defines
+      # OTA rollback support, driven by ${ota_rollback} (default true). On esp-idf this defines
       # USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, deferring boot-time confirmation to
-      # safe_mode). ESPHome's default when safe_mode is present; pinned so a default change can't
-      # silently disarm it. No effect on an arduino build. See hds_v1_0.yaml / the README for detail.
-      enable_ota_rollback: true
+      # safe_mode (the deferral ota.yaml's watchdog needs). ESPHome emits it on BOTH frameworks, but
+      # the SDK's watchdog + MQTT confirm are #ifdef USE_ESP_IDF, so an arduino device MUST pair
+      # framework_variant: arduino with ota_rollback: false — see hds_v1_0.yaml / core.yaml / README.
+      enable_ota_rollback: ${ota_rollback}
 
 switch:
   - platform: gpio

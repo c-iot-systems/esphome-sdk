@@ -245,11 +245,19 @@ that timer is the only early confirmer. At the stock 1 minute the image would al
 `ESP_OTA_IMG_VALID` four minutes before the 300s watchdog fires, so its `PENDING_VERIFY` gate could
 never trigger and a genuinely bad OTA would silently survive. `ota.yaml` therefore sets
 `safe_mode: boot_is_good_after: 330s` — past the watchdog — so the **broker**, not a boot timer, owns
-validity confirmation for the whole window. The trade-off: on esp-idf a freshly-flashed image stays
-subject to bootloader rollback-on-reboot until it either reaches the broker or survives 330s, slightly
-longer than ESPHome's default; a device that has already confirmed once is unaffected. The
-`check-rollback-timing.sh` gate fails the build if `boot_is_good_after` ever drops to or below the
-watchdog delay, so this ordering can never silently regress.
+validity confirmation for the whole window. The trade-off is twofold. First, on esp-idf a
+freshly-flashed image stays subject to bootloader rollback-on-reboot until it either reaches the
+broker or survives 330s, slightly longer than ESPHome's default; an image that has already confirmed
+(reached the broker once, or lived past 330s) is `ESP_OTA_IMG_VALID` and is never rolled back by this
+mechanism. Second — and this affects **every** boot, not just a freshly-flashed one — `safe_mode`
+clears its boot-loop counter inside the same `mark_successful()` that confirms the image, so raising
+`boot_is_good_after` from ESPHome's stock `1min` to `330s` also delays that counter reset to 330s on
+each boot. A device that power-cycles repeatedly within 330s of boot therefore accumulates those boots
+toward safe mode even though it is otherwise healthy. The SDK's `num_attempts: 50` (ten times
+ESPHome's stock `5`) absorbs this: fifty sub-330s power-cycles in a row would be required before
+safe mode triggers, far beyond any normal power event. The `check-rollback-timing.sh` gate fails the
+build if `boot_is_good_after` ever drops to or below the watchdog delay, so the confirmation ordering
+can never silently regress.
 
 ## `${sdk_ref}` — pinning the components with the YAML
 
@@ -433,15 +441,27 @@ uses.
 
 **The default is `esp-idf`.** Earlier revisions of these board files defaulted to arduino; a device
 that relied on that must now set `framework_variant: arduino` explicitly. The framework choice has one
-behavioural consequence in the shared modules: `ota.yaml`'s post-boot **rollback watchdog is compiled
-inside `#ifdef USE_ESP_IDF`**. So on an **arduino** build it is compiled out entirely (there is no
-ESP-IDF rollback API on that path) and carries no protection; on an **esp-idf** build it is active and
-guards a freshly-flashed image (see the OTA rollback section). Because the default is esp-idf, a
-default build ships that protection; a device that opts into arduino gives it up. The board files pin
-`esp32: framework: advanced: enable_ota_rollback: true` so the rollback support the watchdog depends
-on cannot be silently disabled — a no-op on arduino, since that option is emitted only on the esp-idf
-toolchain. The `framework_variant: arduino` validate fixture and the default (esp-idf) fixtures cover
-both paths; release CI compiles each for real.
+behavioural consequence in the shared modules: `ota.yaml`'s post-boot **rollback watchdog and
+`criotive_mqtt.yaml`'s MQTT confirmation are both compiled inside `#ifdef USE_ESP_IDF`**. So on an
+**arduino** build they are compiled out entirely and the build carries no post-OTA rollback
+protection; on an **esp-idf** build they are active and guard a freshly-flashed image (see the OTA
+rollback section). Because the default is esp-idf, a default build ships that protection; a device
+that opts into arduino gives it up.
+
+The rollback SUPPORT flag itself — `esp32: framework: advanced: enable_ota_rollback` — is NOT
+esp-idf-only, however. ESPHome 2026.5.1 emits its `USE_OTA_ROLLBACK` define and
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` sdkconfig option for **both** frameworks (the
+`enable_ota_rollback` branch in `components/esp32/__init__.py`'s `to_code` runs unconditionally, not
+under the esp-idf-only branch). `USE_OTA_ROLLBACK` makes `esp32/hal.cpp` defer boot-time image
+confirmation to `safe_mode` and arms bootloader rollback. If it were left on for arduino — where the
+watchdog and the broker's confirmation are compiled out — a healthy freshly-flashed image that
+power-cycled within `boot_is_good_after` would be rolled back by the bootloader with nothing able to
+confirm it early. So the board files drive `enable_ota_rollback` from the **`ota_rollback`
+substitution** (default `true`), and an **arduino device must pair `framework_variant: arduino` with
+`ota_rollback: false`** — leaving `USE_OTA_ROLLBACK` undefined so `hal.cpp` confirms at boot and no
+rollback machinery is compiled at all. Rollback protection therefore lives only on esp-idf, as stated.
+The `framework_variant: arduino` validate fixture exercises exactly that pairing, and the default
+(esp-idf) fixtures cover the rollback path; release CI compiles each for real.
 
 #### SW1 / GPIO1 — opt-in, because it silences serial logging
 

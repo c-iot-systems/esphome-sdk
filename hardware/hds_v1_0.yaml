@@ -158,14 +158,16 @@ esp32:
     # framework name the esp32 schema then checks — the same pattern can_resistor_status already uses.
     type: ${framework_variant}
     advanced:
-      # Pin OTA rollback support ON. On esp-idf this defines USE_OTA_ROLLBACK +
-      # CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, which defers the boot-time image confirmation to
-      # safe_mode — esp32/hal.cpp guards its immediate esp_ota_mark_app_valid_cancel_rollback() with
-      # #ifndef USE_OTA_ROLLBACK — the deferral ota.yaml's rollback watchdog depends on. It is the
-      # ESPHome default when safe_mode is present; pinned here so the watchdog can never be silently
-      # disarmed by a default change. No effect on an arduino build (the option is emitted only on the
-      # esp-idf toolchain), so it is safe to carry in this shared board file.
-      enable_ota_rollback: true
+      # OTA rollback support, driven by ${ota_rollback} (default true; see modules/core.yaml). On
+      # esp-idf this defines USE_OTA_ROLLBACK + CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, which defers
+      # the boot-time image confirmation to safe_mode — esp32/hal.cpp guards its immediate
+      # esp_ota_mark_app_valid_cancel_rollback() with #ifndef USE_OTA_ROLLBACK — the deferral
+      # ota.yaml's rollback watchdog depends on. ESPHome emits this on BOTH frameworks (not just
+      # esp-idf), but the SDK's watchdog and MQTT confirmation are #ifdef USE_ESP_IDF, so an arduino
+      # device MUST pair framework_variant: arduino with ota_rollback: false — otherwise confirmation
+      # is deferred with no watchdog and no broker cancel and a healthy fresh image could roll back.
+      # With ota_rollback: false, USE_OTA_ROLLBACK is undefined and rollback exists only on esp-idf.
+      enable_ota_rollback: ${ota_rollback}
 
 switch:
   - platform: gpio

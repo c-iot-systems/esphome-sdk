@@ -20,6 +20,7 @@
 #   | sdk_ref              | yes      | —       | core.yaml (vars)   | see note below               |
 #   | logger_level         | no       | NONE    | core.yaml          | prod-off; raise deliberately |
 #   | framework_variant    | no       | esp-idf | core.yaml          | esp32 framework: esp-idf|arduino |
+#   | ota_rollback         | no       | true    | core.yaml          | esp32 enable_ota_rollback; set false w/ arduino |
 #   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
 #   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
 #   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
@@ -95,10 +96,27 @@
 # esp-idf and arduino. The default is esp-idf: on esp-idf the ota.yaml post-boot rollback watchdog
 # (#ifdef USE_ESP_IDF) is compiled in, so a default build ships the OTA rollback protection; a
 # device that wants the arduino toolchain overrides framework_variant: arduino per device and gives
-# that protection up (see the README OTA + framework sections).
+# that protection up — and MUST also set ota_rollback: false (see the next paragraph and the README
+# OTA + framework sections).
+#
+# ota_rollback feeds the hardware file's esp32.framework.advanced.enable_ota_rollback. It MUST be
+# paired with framework_variant: keep the default `true` for esp-idf, and set BOTH
+# framework_variant: arduino AND ota_rollback: false for an arduino device. Why it is a separate knob
+# and not simply left at ESPHome's own default: ESPHome 2026.5.1 emits USE_OTA_ROLLBACK +
+# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE for enable_ota_rollback on BOTH frameworks (esp32/__init__.py
+# to_code, the `if advanced[CONF_ENABLE_OTA_ROLLBACK]` block is at base indent, not under the
+# esp-idf-only branch). USE_OTA_ROLLBACK makes esp32/hal.cpp defer boot-time image confirmation to
+# safe_mode and arms bootloader rollback — but the SDK's watchdog and MQTT confirmation are both
+# #ifdef USE_ESP_IDF, so on arduino they are compiled out. Leaving rollback enabled on arduino would
+# therefore defer confirmation to a 330s timer with no broker cancel and no watchdog, letting a
+# healthy freshly-flashed image that reboots inside that window be rolled back by the bootloader.
+# Setting ota_rollback: false on arduino leaves USE_OTA_ROLLBACK undefined, so hal.cpp confirms the
+# image immediately at boot and no rollback machinery exists — rollback protection lives ONLY on
+# esp-idf, exactly as the README states.
 substitutions:
   logger_level: NONE
   framework_variant: esp-idf
+  ota_rollback: "true"
 
 esphome:
   name: ${device_name}
