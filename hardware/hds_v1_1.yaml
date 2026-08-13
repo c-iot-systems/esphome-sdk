@@ -1,58 +1,207 @@
-# hds_v1_1 — concrete board definition + pin map for the v1.1 board.
+# hds_v1_1 — concrete board definition + pin map for the v1.1 board (arduino framework).
 #
 # Board, variant and framework are CONCRETE (esp32dev / esp32 / arduino) — never
-# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating.
+# ${DEVICE_BOARD}/${DEVICE_VARIANT} templating. The esp-idf build of this same board is
+# hds_v1_1_idf.yaml, which reuses everything here and only swaps the framework; a device imports
+# exactly one of the two.
 #
 # This board has no indicator LEDs, so it ships no OTA visual feedback (no module reaches into a
 # hardware id either way).
 #
-# Pin map:
-#   SW1          -> GPIO1    (on-board push button)
+# Fixed pin map:
 #   CAN RESISTOR -> GPIO12   (CAN bus termination resistor)
 #
-# SW1 drives the STANDARD control buttons from controls.yaml (button_restart / button_factory) by
-# id — the hardware reaches into the module's public button ids, not the reverse. A device that
-# ships this board therefore imports controls.yaml. on_click is the explicit list form: three
-# separate click-length windows, each its own automation.
+# ── SW1 is opt-in, and is NOT wired here ──────────────────────────────────────────────────────
+# This board has an on-board push button (SW1) on GPIO1. GPIO1 is the ESP32's U0TXD line, so
+# configuring SW1 as a GPIO input takes over the primary UART's TX pin and silences serial-console
+# logging on the board. That trade-off must be a deliberate per-device choice, so SW1 is NOT wired
+# in this board file — it lives in the importable unit hds_v1_1_sw1.yaml. A device that wants the
+# button imports that file (and controls.yaml, whose buttons SW1 presses); a device that wants
+# serial logs simply does not, and GPIO1 stays free. A substitution cannot conditionally omit a YAML
+# block, so the split into a second file is the only way to make the button genuinely optional. See
+# the README's "SW1 / GPIO1" note.
 #
-# can_resistor_status selects the termination restore mode. Only the two endpoint nodes of a CAN
+# can_resistor_status selects the CAN termination restore mode. Only the two endpoint nodes of a CAN
 # segment should terminate; a node wired mid-bus must set ALWAYS_OFF or it corrupts the bus.
 # Default ALWAYS_ON matches most deployments; a consumer overrides it per device.
+#
+# ── Slot pin table (slot_<n>_<module>_<signal>) ───────────────────────────────────────────────
+# This board carries seven module slots. Each substitution below resolves ONE module signal, for a
+# given module placed in a given slot, to the physical GPIO that signal lands on. A consumer that
+# wires, say, a Double Relay into slot 3 references ${slot_3_double_relay_relay_1} as that relay's
+# pin. The values are static: they were read directly from the board's slot/module data (the physical
+# per-slot GPIO table and each module's signal-to-lane mapping) and only combinations that physically
+# fit the board are listed. The SDK CANNOT check that a slot actually holds the module a name refers
+# to — it never sees a device's populated slot map — so choosing the right name for the module a slot
+# really holds is the consumer's responsibility (see the README).
 substitutions:
   can_resistor_status: ALWAYS_ON
+  slot_1_triple_digital_input_in1: "23"
+  slot_1_triple_digital_input_in2: "16"
+  slot_1_triple_digital_input_in3: "4"
+  slot_1_level_shifter_io1: "23"
+  slot_1_level_shifter_io2: "16"
+  slot_1_level_shifter_in3: "4"
+  slot_1_wire_io1: "23"
+  slot_1_wire_io2: "16"
+  slot_1_wire_in3: "4"
+  slot_1_double_relay_relay_1: "16"
+  slot_1_double_relay_relay_2: "23"
+  slot_1_audio_tx_dat: "13"
+  slot_1_audio_ctrl: "14"
+  slot_1_audio_rx: "35"
+  slot_1_audio_clk: "16"
+  slot_1_audio_cmd: "23"
+  slot_1_audio_busy: "4"
+  slot_1_io_expander_keyscan_5x5_sda: "13"
+  slot_1_io_expander_keyscan_5x5_scl: "14"
+  slot_1_io_expander_keyscan_5x5_int: "35"
+  slot_1_h_bridge_out_1: "16"
+  slot_1_h_bridge_out_2: "23"
+  slot_1_audio_v2_tx_dat: "16"
+  slot_1_audio_v2_ctrl: "23"
+  slot_1_audio_v2_rx: "4"
+  slot_2_triple_digital_input_in1: "14"
+  slot_2_triple_digital_input_in2: "13"
+  slot_2_triple_digital_input_in3: "35"
+  slot_2_level_shifter_io1: "14"
+  slot_2_level_shifter_io2: "13"
+  slot_2_level_shifter_in3: "35"
+  slot_2_wire_io1: "14"
+  slot_2_wire_io2: "13"
+  slot_2_wire_in3: "35"
+  slot_2_double_relay_relay_1: "13"
+  slot_2_double_relay_relay_2: "14"
+  slot_2_audio_tx_dat: "33"
+  slot_2_audio_ctrl: "32"
+  slot_2_audio_rx: "39"
+  slot_2_audio_clk: "13"
+  slot_2_audio_cmd: "14"
+  slot_2_audio_busy: "35"
+  slot_2_io_expander_keyscan_5x5_sda: "33"
+  slot_2_io_expander_keyscan_5x5_scl: "32"
+  slot_2_io_expander_keyscan_5x5_int: "39"
+  slot_2_h_bridge_out_1: "13"
+  slot_2_h_bridge_out_2: "14"
+  slot_2_audio_v2_tx_dat: "13"
+  slot_2_audio_v2_ctrl: "14"
+  slot_2_audio_v2_rx: "35"
+  slot_3_triple_digital_input_in1: "32"
+  slot_3_triple_digital_input_in2: "33"
+  slot_3_triple_digital_input_in3: "39"
+  slot_3_level_shifter_io1: "32"
+  slot_3_level_shifter_io2: "33"
+  slot_3_level_shifter_in3: "39"
+  slot_3_wire_io1: "32"
+  slot_3_wire_io2: "33"
+  slot_3_wire_in3: "39"
+  slot_3_double_relay_relay_1: "33"
+  slot_3_double_relay_relay_2: "32"
+  slot_3_h_bridge_out_1: "33"
+  slot_3_h_bridge_out_2: "32"
+  slot_3_audio_v2_tx_dat: "33"
+  slot_3_audio_v2_ctrl: "32"
+  slot_3_audio_v2_rx: "39"
+  slot_4_triple_digital_input_in1: "26"
+  slot_4_triple_digital_input_in2: "25"
+  slot_4_triple_digital_input_in3: "36"
+  slot_4_level_shifter_io1: "26"
+  slot_4_level_shifter_io2: "25"
+  slot_4_level_shifter_in3: "36"
+  slot_4_wire_io1: "26"
+  slot_4_wire_io2: "25"
+  slot_4_wire_in3: "36"
+  slot_4_double_relay_relay_1: "25"
+  slot_4_double_relay_relay_2: "26"
+  slot_4_audio_tx_dat: "27"
+  slot_4_audio_ctrl: "15"
+  slot_4_audio_rx: "34"
+  slot_4_audio_clk: "25"
+  slot_4_audio_cmd: "26"
+  slot_4_audio_busy: "36"
+  slot_4_io_expander_keyscan_5x5_sda: "27"
+  slot_4_io_expander_keyscan_5x5_scl: "15"
+  slot_4_io_expander_keyscan_5x5_int: "34"
+  slot_4_io_expander_keyscan_10x8_sda: "17"
+  slot_4_io_expander_keyscan_10x8_scl: "5"
+  slot_4_io_expander_keyscan_10x8_int: "22"
+  slot_4_h_bridge_out_1: "25"
+  slot_4_h_bridge_out_2: "26"
+  slot_4_audio_v2_tx_dat: "25"
+  slot_4_audio_v2_ctrl: "26"
+  slot_4_audio_v2_rx: "36"
+  slot_5_triple_digital_input_in1: "15"
+  slot_5_triple_digital_input_in2: "27"
+  slot_5_triple_digital_input_in3: "34"
+  slot_5_level_shifter_io1: "15"
+  slot_5_level_shifter_io2: "27"
+  slot_5_level_shifter_in3: "34"
+  slot_5_wire_io1: "15"
+  slot_5_wire_io2: "27"
+  slot_5_wire_in3: "34"
+  slot_5_double_relay_relay_1: "27"
+  slot_5_double_relay_relay_2: "15"
+  slot_5_audio_tx_dat: "17"
+  slot_5_audio_ctrl: "5"
+  slot_5_audio_rx: "22"
+  slot_5_audio_clk: "27"
+  slot_5_audio_cmd: "15"
+  slot_5_audio_busy: "34"
+  slot_5_io_expander_keyscan_5x5_sda: "17"
+  slot_5_io_expander_keyscan_5x5_scl: "5"
+  slot_5_io_expander_keyscan_5x5_int: "22"
+  slot_5_h_bridge_out_1: "27"
+  slot_5_h_bridge_out_2: "15"
+  slot_5_audio_v2_tx_dat: "27"
+  slot_5_audio_v2_ctrl: "15"
+  slot_5_audio_v2_rx: "34"
+  slot_6_triple_digital_input_in1: "5"
+  slot_6_triple_digital_input_in2: "17"
+  slot_6_triple_digital_input_in3: "22"
+  slot_6_level_shifter_io1: "5"
+  slot_6_level_shifter_io2: "17"
+  slot_6_level_shifter_in3: "22"
+  slot_6_wire_io1: "5"
+  slot_6_wire_io2: "17"
+  slot_6_wire_in3: "22"
+  slot_6_double_relay_relay_1: "17"
+  slot_6_double_relay_relay_2: "5"
+  slot_6_audio_tx_dat: "19"
+  slot_6_audio_ctrl: "21"
+  slot_6_audio_rx: "18"
+  slot_6_audio_clk: "17"
+  slot_6_audio_cmd: "5"
+  slot_6_audio_busy: "22"
+  slot_6_io_expander_keyscan_5x5_sda: "19"
+  slot_6_io_expander_keyscan_5x5_scl: "21"
+  slot_6_io_expander_keyscan_5x5_int: "18"
+  slot_6_h_bridge_out_1: "17"
+  slot_6_h_bridge_out_2: "5"
+  slot_6_audio_v2_tx_dat: "17"
+  slot_6_audio_v2_ctrl: "5"
+  slot_6_audio_v2_rx: "22"
+  slot_7_triple_digital_input_in1: "21"
+  slot_7_triple_digital_input_in2: "19"
+  slot_7_triple_digital_input_in3: "18"
+  slot_7_level_shifter_io1: "21"
+  slot_7_level_shifter_io2: "19"
+  slot_7_level_shifter_in3: "18"
+  slot_7_wire_io1: "21"
+  slot_7_wire_io2: "19"
+  slot_7_wire_in3: "18"
+  slot_7_double_relay_relay_1: "19"
+  slot_7_double_relay_relay_2: "21"
+  slot_7_h_bridge_out_1: "19"
+  slot_7_h_bridge_out_2: "21"
+  slot_7_audio_v2_tx_dat: "19"
+  slot_7_audio_v2_ctrl: "21"
+  slot_7_audio_v2_rx: "18"
 
 esp32:
   board: esp32dev
   variant: esp32
   framework:
     type: arduino
-
-binary_sensor:
-  - platform: gpio
-    pin: 1
-    name: "SW1"
-    internal: true
-    filters:
-      - invert
-    on_click:
-      - min_length: 100ms
-        max_length: 2s
-        then:
-          - logger.log: "Rebooting"
-          - delay: 1s
-          - button.press: button_restart
-      - min_length: 2s
-        max_length: 10s
-        then:
-          - logger.log: "WiFi Manager"
-          - delay: 1s
-          - button.press: button_factory  # TODO: start captive instead.
-      - min_length: 20s
-        max_length: 1000s
-        then:
-          - logger.log: "Factory"
-          - delay: 1s
-          - button.press: button_factory
 
 switch:
   - platform: gpio

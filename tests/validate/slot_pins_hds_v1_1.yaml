@@ -1,0 +1,85 @@
+# Positive validate fixture — exercises the hds_v1_1 slot pin table by NAME. It imports the hds_v1_1
+# hardware module (which owns the slot_<n>_<module>_<signal> substitutions) plus core + wifi, and
+# wires one substitution PER MODULE TYPE the board supports into a gpio binary_sensor pin. If any slot
+# name is typo'd, its ${...} stays a literal and the pin schema rejects it ("Cannot resolve pin
+# name"), so `esphome config` fails — that is what makes the names exercised rather than merely
+# declared. Distinct pins are chosen per module type so no two inputs collide (ESPHome rejects a
+# reused pin). ignore_pin_validation_error is set because some legitimate slot pins are flash/strapping
+# pins on these modules that ESPHome's generic ESP32 check would otherwise reject — it does NOT hide a
+# mistyped name. wifi is imported because core's time.sntp needs a network component. The pin VALUES
+# are validated against the board data in the PR, not here — nothing flashes hardware.
+#
+# CI materializes __SDK_REF__ into the revision under test (see tests/validate/README.md).
+substitutions:
+  device_name: hds-v1-1-slots
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: ${slot_1_triple_digital_input_in1}
+      ignore_pin_validation_error: true
+    name: "slot_1_triple_digital_input_in1"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_1_level_shifter_io2}
+      ignore_pin_validation_error: true
+    name: "slot_1_level_shifter_io2"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_1_wire_in3}
+      ignore_pin_validation_error: true
+    name: "slot_1_wire_in3"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_1_audio_tx_dat}
+      ignore_pin_validation_error: true
+    name: "slot_1_audio_tx_dat"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_1_io_expander_keyscan_5x5_scl}
+      ignore_pin_validation_error: true
+    name: "slot_1_io_expander_keyscan_5x5_scl"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_2_audio_v2_rx}
+      ignore_pin_validation_error: true
+    name: "slot_2_audio_v2_rx"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_3_double_relay_relay_1}
+      ignore_pin_validation_error: true
+    name: "slot_3_double_relay_relay_1"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_3_h_bridge_out_2}
+      ignore_pin_validation_error: true
+    name: "slot_3_h_bridge_out_2"
+    internal: true
+  - platform: gpio
+    pin:
+      number: ${slot_4_io_expander_keyscan_10x8_sda}
+      ignore_pin_validation_error: true
+    name: "slot_4_io_expander_keyscan_10x8_sda"
+    internal: true
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
