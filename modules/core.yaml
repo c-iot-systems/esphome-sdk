@@ -23,8 +23,12 @@
 #   | logger_hardware_uart | no       | UART0   | core.yaml          | logger UART; S3 adds USB_CDC/USB_SERIAL_JTAG |
 #   | framework_variant    | no       | esp-idf | core.yaml          | esp32 framework: esp-idf|arduino |
 #   | ota_rollback         | no       | true    | core.yaml          | esp32 enable_ota_rollback; set false w/ arduino |
-#   | wifi_ssid            | yes      | —       | wifi.yaml          |                              |
-#   | wifi_password        | yes      | —       | wifi.yaml          | no default, ever             |
+#   | wifi_ssid            | no       | (empty) | wifi.yaml          | station slot 1               |
+#   | wifi_password        | no       | (empty) | wifi.yaml          | required once slot 1 has ssid|
+#   | wifi_ssid_2          | no       | (empty) | wifi.yaml          | station slot 2               |
+#   | wifi_password_2      | no       | (empty) | wifi.yaml          | required once slot 2 has ssid|
+#   | wifi_ssid_3          | no       | (empty) | wifi.yaml          | station slot 3               |
+#   | wifi_password_3      | no       | (empty) | wifi.yaml          | required once slot 3 has ssid|
 #   | wifi_ap_password     | yes      | —       | wifi.yaml          | fallback AP; no default      |
 #   | wifi_reboot_timeout  | no       | 0s      | wifi.yaml          | 0s = reboot DISABLED (offline) |
 #   | mqtt_broker          | yes      | —       | criotive_mqtt.yaml |                              |
@@ -76,7 +80,7 @@
 # schema. So referencing a substitution is NOT enough to make it required.
 #   - device_name lands in `esphome: name:`, whose identifier schema rejects the leftover
 #     `${device_name}` literal, so omitting it already fails — no extra guard needed.
-#   - firmware_version, sdk_ref (esphome.comment, below) and wifi.yaml's credentials land in
+#   - firmware_version, sdk_ref (esphome.comment, below) and wifi.yaml's AP password land in
 #     free-form string fields that accept the literal, so each is wrapped in the guard
 #     `${ x if x is defined else 1/0 }`: when the value is present the expression returns it
 #     unchanged; when it is missing the ZeroDivisionError surfaces as a hard `cv.Invalid` (the
