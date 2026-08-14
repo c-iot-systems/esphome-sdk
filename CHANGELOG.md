@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.1...v0.1.2) (2026-08-14)
+
+
+### Features
+
+* **ack_button:** a button that acknowledges its press on the state topic (AIOT-115) ([4ab0611](https://github.com/c-iot-systems/esphome-sdk/commit/4ab06111af79f96554b480d08e74e3997bea8b8c))
+* **controls,location:** move the SDK's own buttons onto ack_button and gate it (AIOT-116) ([3a750ea](https://github.com/c-iot-systems/esphome-sdk/commit/3a750eac1300068f19494be565fa254de53892e5))
+
 ## [0.1.1](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.0...v0.1.1) (2026-08-14)
 
 
