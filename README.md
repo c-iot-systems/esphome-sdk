@@ -446,8 +446,9 @@ of passing silently.
 
 - **`validate.yml`** — every pull request. Materializes the PR head SHA into each validate config's
   package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs the
-  `check-automation-syntax.sh`, `check-sdk-ref.sh`, `check-negative.sh`, `check-offline-survival.sh`,
-  `check-rollback-timing.sh` and `check-contract-diff.sh` gates. This validates the *revision under
+  `check-automation-syntax.sh`, `check-button-platform.sh`, `check-sdk-ref.sh`,
+  `check-negative.sh`, `check-offline-survival.sh`, `check-rollback-timing.sh` and
+  `check-contract-diff.sh` gates. This validates the *revision under
   test*, never a published tag.
 - **`release-gate.yml`** — every push to `main`. `compile` runs the real `esphome compile`, one
   parallel job per fixture (the list is discovered, not hardcoded, so a new fixture cannot escape
@@ -492,8 +493,15 @@ restructuring the others.
   firmware attaches to this same component, since `DebugComponent::update()` is the only place those
   publish. The module's own two text sensors are unaffected either way: they publish from
   `dump_config()` at boot. A device with no debug sensors may set `never`.
-- `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
-- `location.yaml` — `google_location` and its `external_components`.
+- `controls.yaml` — shutdown / restart / safe-mode / factory-reset. Each is a visible
+  `ack_button` whose `on_press:` waits 500ms and then presses an `internal: true` action
+  platform. The split is what makes a remote press confirmable at all: the action platform
+  reboots or wipes the device, and only the `ack_button` in front of it can publish that the
+  press landed. The delay lets that publish reach the socket before the action kills the MQTT
+  client. Declares `ack_button`'s `external_components` itself, so importing this module is
+  enough.
+- `location.yaml` — `google_location`, its `ack_button` Location Request, and the
+  `external_components` for both.
 
 ### Optional entity modules
 
@@ -548,6 +556,14 @@ the entities themselves stay in the device's own config.
 
   With no `mqtt:` in the config there is no companion and this is an ordinary button,
   indistinguishable from `platform: template`.
+
+  **The SDK holds itself to this.** `check-button-platform.sh` fails the build if any button in
+  `modules/` or `hardware/` is visible to the platform — that is, not `internal: true` — and is not
+  an `ack_button`. `controls.yaml` is the shape to copy: a visible `ack_button` in front of an
+  `internal: true` action platform. The rule is not a ban on the `button:` key, because
+  `platform: shutdown` / `restart` / `safe_mode` / `factory_reset` genuinely perform the reboot and
+  the wipe that `ack_button` cannot; `internal: true` is what makes them invisible to the platform,
+  and therefore exempt from having to answer it.
 
 ### Optional hardware modules
 

@@ -1,24 +1,48 @@
-# Delays allow MQTT to publish before the device acts.
+# The four operator-facing controls, and the four internal buttons that actually
+# do the work.
+#
+# Each visible button is an `ack_button`, so pressing it from the platform is
+# confirmable: it publishes PRESS on its state topic from `press_action()`,
+# before the automation below runs. A stock button publishes nothing, which on
+# these four is the worst place for it — the device stops answering the instant
+# the action lands, so "did the Restart I clicked actually arrive?" has no answer
+# after the fact.
+#
+# The action platforms stay stock and stay `internal: true`. They perform the
+# reboot / wipe, which `ack_button` cannot, and internal keeps them off the
+# broker entirely: no discovery, no command topic, nothing to acknowledge. The
+# visible button is the thing the platform talks to; this is its target.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref: ${sdk_ref}
+    components: [ack_button]
+
 button:
-  - platform: template
+  # The delay is what makes the acknowledgement survive. Publishing it before the
+  # automation fixes the ORDER, not the delivery: `publish()` only queues, and
+  # every one of these actions kills the MQTT client mid-flight. 500ms lets the
+  # loop turn so the packet reaches the socket first.
+  - platform: ack_button
     name: "Shutdown"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_shutdown
-  - platform: template
+  - platform: ack_button
     name: "Restart"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_restart
-  - platform: template
+  - platform: ack_button
     name: "Restart (Safe Mode)"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_safe_mode
-  - platform: template
+  - platform: ack_button
     name: "Factory Reset"
     on_press:
       - then:
