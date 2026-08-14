@@ -265,7 +265,8 @@ one.** It takes `prod` or `hmg`, and the module derives all three connection fac
 They move together because they are not independently valid: a host without its matching anchor
 cannot complete a handshake, and the two environments are signed by **different** private CAs, so
 mixing one env's host with the other's certificate fails every connection. Binding them to a single
-substitution makes that combination unrepresentable instead of merely discouraged.
+substitution means the supported surface cannot express that mismatch — one knob moves all three, so
+there is no way to get half of a switch by editing one value and forgetting another.
 
 Both PEMs ship in `criotive_mqtt.yaml`. They are public material — a CA certificate is what a broker
 hands to anyone who opens a TLS connection — and the selection resolves at config time, so only the
@@ -286,6 +287,14 @@ This removes the *supported* path to a third-party broker; it does not prevent o
 `main.yaml` merges over the package and can always write its own `mqtt:` keys — enforcement of who
 may connect lives at the broker, not in this repo. What the SDK guarantees is that the default,
 documented path reaches a criotive broker over TLS with the right anchor.
+
+The same caveat covers this module's **internal** substitutions. `criotive_env_selected`,
+`criotive_ca_prod` and `criotive_ca_hmg` share the one global substitution namespace ESPHome gives
+every package, so a consumer that sets them wins — `criotive_env: hmg` alongside
+`criotive_env_selected: prod` really does connect to prod. They are not knobs: `criotive_env` is the
+input, these three are how the module computes from it, and overriding one is the same act as
+writing your own `mqtt:` block. Nothing accidental reaches them; a config has to name them to break
+the pairing.
 
 The certificates are long-lived (the prod anchor is valid to 2127, hmg to 2124), so this repo ships
 no expiry gate: there is nothing for one to detect within the service life of any device. The change

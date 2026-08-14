@@ -1,7 +1,12 @@
 substitutions:
-  # The deployment this device talks to: `prod` or `hmg`. It is the ONLY broker knob — host, TLS
-  # port and trust anchor are all derived from it below, so an SDK device cannot be pointed at a
-  # broker we do not run without editing its own config outside the package.
+  # The deployment this device talks to: `prod` or `hmg`. It is the ONLY input here — host, TLS port
+  # and trust anchor are all derived from it below, so no config can select a host without also
+  # selecting the anchor that validates it.
+  #
+  # `criotive_env_selected` and the two `criotive_ca_*` values below are INTERNAL to this module.
+  # ESPHome gives every package one shared substitution namespace, so a consumer that names them
+  # overrides them and the derivation breaks — that is not a supported knob, it is the same act as
+  # writing your own `mqtt:` block over the package. Set `criotive_env` and nothing else.
   #
   # Two failure modes, both loud and both at validation time rather than at runtime:
   #   * the substitution is missing  -> this guard divides by zero, naming `criotive_env`;
