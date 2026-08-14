@@ -1,0 +1,16 @@
+# The ack_button driver only. Declaring the buttons themselves is device-specific:
+#
+#   button:
+#     - platform: ack_button
+#       name: "Abrir Solenoide"
+#       on_press:
+#         - switch.turn_on: solenoide
+#
+# Identical to a stock button in every respect except that its discovery config
+# keeps a state topic, on which it echoes PRESS after each press.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref: ${sdk_ref}
+    components: [ack_button]
