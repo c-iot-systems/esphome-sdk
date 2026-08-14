@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.1](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.0...v0.1.1) (2026-08-14)
+
+
+### Features
+
+* **hardware:** publish the Power connector's CAN pins as can_tx / can_rx ([a924536](https://github.com/c-iot-systems/esphome-sdk/commit/a9245362f55ca1f1a3887f2102676e3a852e39cb))
+* **phone:** bound the accumulated input with max_length ([0aa4828](https://github.com/c-iot-systems/esphome-sdk/commit/0aa48289659fa8da6387bfac1e9c2b11baf45f61))
+* **phone:** runtime passwords, submit/clear actions, on_no_match, max_length — plus can_tx/can_rx ([1a781bc](https://github.com/c-iot-systems/esphome-sdk/commit/1a781bcd38a7953ff7bf40f7ae714293fbf2d9fd))
+* **phone:** templatable passwords, submit/clear actions, and on_no_match ([6071b86](https://github.com/c-iot-systems/esphome-sdk/commit/6071b863801932a64aceac50e20db8d64ec331fb))
+
+
+### Bug Fixes
+
+* **phone:** dispatch callbacks before clearing and resolve passwords up front ([34bb500](https://github.com/c-iot-systems/esphome-sdk/commit/34bb5000738a82b47afa3a68abc65463682a893a))
+* **phone:** let sequence_timeout: 0s disable the timeout instead of firing it always ([be7e7e1](https://github.com/c-iot-systems/esphome-sdk/commit/be7e7e11c3530b0a287e0ea051390e7f23977c15))
+* **phone:** override Action::play correctly and snapshot the submitted input ([9356282](https://github.com/c-iot-systems/esphome-sdk/commit/93562824644ea1a0bfcc262dbacda91b091b3050))
+
 ## 0.1.0 (2026-08-14)
 
 
