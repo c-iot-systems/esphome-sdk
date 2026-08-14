@@ -529,6 +529,22 @@ CI compiles the C++ at least once per release.
   they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
   rows × columns), and any hook sensor / passwords / automations the device needs.
 
+  **A password may be templatable.** `password:` accepts a lambda as well as a literal, and it is
+  resolved on every submission — so `password: !lambda "return id(my_text).state;"` lets an operator
+  change the code from a `text:` entity without a reflash, while a literal still compiles to a
+  constant. A prop whose codes are configured from the platform wants the lambda form.
+
+  **`phone.submit` / `phone.clear` drive it from outside the matrix.** `enter_keys` and `clear_keys`
+  can only name keys on the phone's own matrix, so a prop whose enter button is a separate GPIO — or
+  whose reset is driven by an automation — has no key to name. The two actions submit and clear the
+  accumulated input directly; `phone.submit` ignores empty input, exactly as the enter key does.
+
+  **Prefer `on_no_match` to a per-password `on_password_wrong`.** The per-entry trigger fires once
+  for **every** entry the input did not match, so with N passwords configured a single wrong code
+  fires it N times — right when the passwords are independent locks, wrong when they are
+  alternatives (one keypad, one code per colour). The component-level `on_no_match` fires exactly
+  once per submission that matched nothing, which is what a single wrong-code effect should hang on.
+
 ### Hardware modules
 
 A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board and variant

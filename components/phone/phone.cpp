@@ -176,14 +176,20 @@ void Phone::check_timeout_() {
 }
 
 void Phone::validate_input_() {
+  bool matched = false;
   for (auto& entry : this->passwords_) {
-    if (this->input_ == entry.password) {
+    if (this->input_ == entry.password.value()) {
       ESP_LOGD(TAG, "Password correct");
+      matched = true;
       entry.on_right.call(this->input_);
     } else {
       ESP_LOGD(TAG, "Password wrong");
       entry.on_wrong.call(this->input_);
     }
+  }
+  if (!matched) {
+    ESP_LOGD(TAG, "No password matched");
+    this->on_no_match_.call(this->input_);
   }
 }
 

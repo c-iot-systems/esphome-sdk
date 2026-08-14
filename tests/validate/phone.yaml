@@ -1,5 +1,10 @@
 # Fixture: the phone driver as a 4x3 telephone keypad — the key count must equal rows * columns.
 # Self-contained rather than importing core, since the driver needs no network. Release CI compiles it.
+#
+# It also pins down the three capabilities a keypad prop needs beyond plain matching:
+#   * a password read from a `text:` at match time, so an operator can change it without a reflash
+#   * `phone.submit` / `phone.clear`, for an enter button that is NOT a key on this matrix
+#   * `on_no_match`, which fires once per wrong submission instead of once per non-matching entry
 esphome:
   name: phone-testdev
 
@@ -9,6 +14,44 @@ esp32:
     type: arduino
 
 logger:
+
+text:
+  - platform: template
+    name: "Keypad Password"
+    id: text_password
+    mode: text
+    optimistic: true
+    min_length: 0
+    max_length: 100
+    initial_value: "1234"
+    restore_value: true
+    update_interval: never
+
+text_sensor:
+  - platform: template
+    name: "Keypad Input"
+    id: text_input
+    update_interval: never
+
+binary_sensor:
+  # The enter button lives on its own GPIO rather than on the keypad matrix, so
+  # `enter_keys` cannot reach it — this is what phone.submit exists for.
+  - platform: gpio
+    pin:
+      number: GPIO25
+      mode:
+        input: true
+        pullup: true
+    id: button_enter
+    filters:
+      - invert
+      - delayed_on_off: 100ms
+    on_press:
+      - then:
+          - phone.submit: prop_phone
+    on_release:
+      - then:
+          - phone.clear: prop_phone
 
 phone:
   - id: prop_phone
@@ -34,6 +77,23 @@ phone:
             input: true
             pullup: true
     keys: "123456789*0#"
+    passwords:
+      # Runtime-editable: resolved from the text entity on every submission.
+      - password: !lambda "return id(text_password).state;"
+        text_sensor: text_input
+        on_password_right:
+          - then:
+              - logger.log: "operator-configured password accepted"
+      # A literal still compiles to a constant — the back-compatible form.
+      - password: "0000"
+        on_password_right:
+          - then:
+              - logger.log: "literal password accepted"
+    on_no_match:
+      - then:
+          - logger.log:
+              format: "no password matched (%d chars)"
+              args: ["x.length()"]
 
 packages:
   criotive:
