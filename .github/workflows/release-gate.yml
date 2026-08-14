@@ -1,7 +1,8 @@
 name: release-gate
 
 # Compile, then release — in that order, in ONE workflow, so the second cannot happen without the
-# first.
+# first. The compile fans out one job per validate fixture; `needs` treats the matrix as a unit, so
+# the release job is unreachable unless EVERY fixture built.
 #
 # The ordering is the whole point. A tag here is permanent, public and pinned by devices in the
 # field, so the compile has to run while the version is still only a proposal. Two independent
@@ -33,8 +34,39 @@ env:
 # gets its own run instead.
 
 jobs:
-  compile:
+  # The fixture list is DISCOVERED, never hardcoded: a matrix literal would silently stop covering
+  # any fixture added later, and a fixture nobody compiles is exactly the hole this gate exists to
+  # close. Empty is a hard error rather than an empty matrix, because an empty matrix would skip
+  # `compile`, and a skipped need would skip `release` — failing open on the release path.
+  discover:
     runs-on: ubuntu-latest
+    outputs:
+      fixtures: ${{ steps.list.outputs.fixtures }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          set -euo pipefail
+          fixtures="$(find tests/validate -maxdepth 1 \( -name '*.yaml' -o -name '*.yml' \) \
+                        | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+          count="$(jq -r 'length' <<<"$fixtures")"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no validate fixtures found — refusing to let a release proceed uncompiled"
+            exit 1
+          fi
+          echo "discovered ${count} fixture(s): $fixtures"
+          echo "fixtures=${fixtures}" >>"$GITHUB_OUTPUT"
+
+  # One job per fixture. Serially this was ~52 minutes of compiling; in parallel the gate costs
+  # about as long as the single slowest fixture, and stays flat as fixtures are added.
+  # fail-fast: false so one broken fixture still lets every other one report in the same run.
+  compile:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: ${{ fromJSON(needs.discover.outputs.fixtures) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +75,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # A cold PlatformIO toolchain download dominates this job; the key pins the ESPHome version
+      # A cold PlatformIO toolchain download dominates each leg; the key pins the ESPHome version
       # so a bump re-primes the cache instead of reusing a stale toolchain.
       - name: Cache the PlatformIO toolchain
         uses: actions/cache@v4
@@ -58,47 +90,31 @@ jobs:
         run: pip install "esphome==${ESPHOME_VERSION}"
 
       - name: Materialize the main SHA into validate fixtures
-        run: |
-          bash scripts/materialize-sdk-ref.sh --self-test
-          bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
+        run: bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
 
-      # Parity only matches names against fixture FILENAMES. This actually runs them, proving each
-      # required substitution still fails validation when omitted — the difference between a
-      # credential being required and merely being listed as required.
+      - name: esphome compile ${{ matrix.fixture }}
+        run: esphome compile "${{ matrix.fixture }}"
+
+  # The executable negative harness needs esphome but not a build, so it is its own job rather than
+  # something repeated in all N compile legs. Parity only matches names against fixture FILENAMES;
+  # this actually runs them, proving each required substitution still fails validation when omitted.
+  negative:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
       - name: Negative-fixture gate (required substitutions must fail validation)
         run: |
           bash scripts/check-negative.sh --self-test
           bash scripts/check-negative.sh
-
-      - name: esphome compile over validate fixtures
-        run: |
-          set -uo pipefail
-          shopt -s nullglob
-          files=(tests/validate/*.yaml tests/validate/*.yml)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No validate fixtures — nothing to compile."
-            exit 0
-          fi
-          # Compile every fixture even after one fails, then report them together. Stopping at the
-          # first failure would surface one broken fixture per run, and each run is a full
-          # toolchain build — a slow way to learn there were three.
-          failed=()
-          for f in "${files[@]}"; do
-            echo "::group::esphome compile $f"
-            if esphome compile "$f"; then
-              echo "== ok: $f =="
-            else
-              echo "::error file=${f}::esphome compile failed"
-              failed+=("$f")
-            fi
-            echo "::endgroup::"
-          done
-          if [ ${#failed[@]} -gt 0 ]; then
-            echo "::error::${#failed[@]} of ${#files[@]} fixture(s) failed to compile:"
-            printf '  %s\n' "${failed[@]}"
-            exit 1
-          fi
-          echo "All ${#files[@]} fixtures compiled."
 
   # EVERY gate runs again here, not just the contract one. On a pull request they are enforced by
   # validate.yml, but a direct push to main never has a pull request — and without this job a push
@@ -143,7 +159,7 @@ jobs:
         run: bash scripts/check-contract-diff.sh --negative-parity
 
   release:
-    needs: [compile, gates]
+    needs: [compile, negative, gates]
     runs-on: ubuntu-latest
     permissions:
       contents: write
