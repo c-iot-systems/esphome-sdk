@@ -453,8 +453,9 @@ of passing silently.
   `check-rollback-timing.sh` and `check-contract-diff.sh` gates. This validates the *revision under
   test*, never a published tag.
 - **`release-gate.yml`** — every push to `main`. Job `compile` runs the real `esphome compile` over
-  `tests/validate/` and job `contract` re-runs the contract gate against the last released tag; job
-  `release` (release-please, which maintains the release PR and creates the tag) **needs** both. Merging the release PR is itself a push to `main`, so the commit that gets
+  `tests/validate/` and job `gates` re-runs every invariant script plus the contract gate against
+  the last published tag; job `release` (release-please, which maintains the release PR and creates
+  the tag) **needs** both. Merging the release PR is itself a push to `main`, so the commit that gets
   tagged is compiled first — if it does not build, no tag is ever created. This is the gate that can
   still **stop** a bad release, rather than merely report one.
 - **`release.yml`** — a published tag, or `workflow_dispatch` with a tag input. Re-verifies a tag
