@@ -8,6 +8,11 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["wifi"]
+# google_location.h unconditionally includes json/json_util.h to build the geolocation request
+# body, so json's C++ must be in the build whenever this component is used. `esphome config` never
+# compiles C++ and so cannot see this — only a real `esphome compile` does, which is how it was
+# found. Same class of bug as the binary_sensor AUTO_LOAD in components/phone/__init__.py.
+AUTO_LOAD = ["json"]
 CONF_GOOGLE_LOCATION = "google_location"
 
 google_location_ns = cg.esphome_ns.namespace(CONF_GOOGLE_LOCATION)
