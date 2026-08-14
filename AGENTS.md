@@ -50,9 +50,18 @@ patch, both in `release-please-config.json`.)
 4. That merge is another push to `main`, so `release-gate.yml` runs again on the exact commit about
    to be tagged. The `release` job needs both `compile` and `gates`, so **if that tree does not
    build, or violates an invariant, or its contract change is not labelled honestly, no tag is ever
-   created.** When both pass, release-please creates the tag and the GitHub Release — but only if
-   this run's commit is still `main`'s head, since release-please acts on the branch as it is now,
-   not on the SHA the run verified.
+   created.** When both pass, release-please creates the tag and the GitHub Release.
+
+### Only the run that verified a commit may publish it
+
+release-please decides what to publish from the repository's state, not from the SHA of the run
+invoking it, so the `release` job publishes only when **both** are true: this run's commit is still
+`main`'s head, and this commit is the merge of the release PR. Otherwise the action still runs, with
+releases disabled, so the release PR keeps being maintained.
+
+Without the second condition a release PR merged earlier and never tagged — including one whose own
+gates *failed* — could be published later by an unrelated passing run. That commit is exactly the
+one that must never become a tag.
 
 ## Merge strategy: never squash
 

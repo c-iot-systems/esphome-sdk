@@ -62,6 +62,14 @@ jobs:
           bash scripts/materialize-sdk-ref.sh --self-test
           bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
 
+      # Parity only matches names against fixture FILENAMES. This actually runs them, proving each
+      # required substitution still fails validation when omitted — the difference between a
+      # credential being required and merely being listed as required.
+      - name: Negative-fixture gate (required substitutions must fail validation)
+        run: |
+          bash scripts/check-negative.sh --self-test
+          bash scripts/check-negative.sh
+
       - name: esphome compile over validate fixtures
         run: |
           set -euo pipefail
@@ -125,33 +133,52 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # release-please acts on whatever main's HEAD is RIGHT NOW, not on the SHA this run verified.
-      # With no concurrency group, runs overlap: a slow run for an older commit could otherwise
-      # reach this step after main advanced and tag a newer commit whose own gates failed or are
-      # still running. If this run's SHA is no longer main's head, stand down — the run for the
-      # newer head is the one entitled to release it.
-      - name: Release only if this run's commit is still main's head
-        id: head
+      # release-please decides what to publish from the repository's state, not from this run's
+      # SHA, so two separate things have to be true before it is allowed to create a tag.
+      #
+      # (1) This run's commit is still main's head. With no concurrency group runs overlap, and a
+      #     slow run for an older commit must not act on a main that has moved past it.
+      # (2) This commit IS the merge of the release PR. Otherwise release-please would happily
+      #     publish a release PR that was merged earlier and never tagged — including one whose own
+      #     gates FAILED, which is exactly the commit that must never become a tag.
+      #
+      # When either is false the action still runs, with releases disabled, so the release PR keeps
+      # being maintained. Only the run that verified the precise commit being tagged may publish it.
+      - name: Decide whether this run may publish
+        id: guard
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          current="$(gh api "repos/${{ github.repository }}/commits/heads/main" --jq .sha)"
-          if [ "$current" != "${{ github.sha }}" ]; then
-            echo "main has advanced to ${current}; this run verified ${{ github.sha }} — standing down."
-            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          head="$(gh api "repos/${{ github.repository }}/commits/heads/main" --jq .sha)"
+          if [ "$head" != "${{ github.sha }}" ]; then
+            echo "main is at ${head}; this run verified ${{ github.sha }} — maintaining the release PR only."
+            echo "publish=false" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          # The merge commit of the most recently merged release-please PR, if any.
+          merged="$(gh api "repos/${{ github.repository }}/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=50" \
+                      --jq '[.[] | select(.head.ref | startswith("release-please--")) | select(.merged_at != null)][0].merge_commit_sha // ""')"
+          if [ -n "$merged" ] && [ "$merged" = "${{ github.sha }}" ]; then
+            echo "this commit is the release PR merge and passed its gates — publishing."
+            echo "publish=true" >>"$GITHUB_OUTPUT"
           else
-            echo "proceed=true" >>"$GITHUB_OUTPUT"
+            echo "this commit is not a release PR merge (pending release merge: '${merged:-none}') — maintaining the release PR only."
+            echo "publish=false" >>"$GITHUB_OUTPUT"
           fi
 
-      # Maintains the release PR — the version release-please computed from the Conventional Commit
-      # history, plus the CHANGELOG it generated. When that PR merges, this same job (on the merge
-      # commit, after its compile) creates the tag and the GitHub Release.
-      - uses: googleapis/release-please-action@v4
-        if: steps.head.outputs.proceed == 'true'
+      - name: Maintain the release PR (no release)
+        if: steps.guard.outputs.publish != 'true'
+        uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          # Explicit rather than inherited, so this job can never act on a branch other than the
-          # one the compile and contract jobs just verified.
+          target-branch: main
+          skip-github-release: true
+
+      - name: Publish the release for this verified commit
+        if: steps.guard.outputs.publish == 'true'
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           target-branch: main
