@@ -1,0 +1,26 @@
+name: release-please
+
+# Keeps a release PR open against main, carrying the version release-please computed from the
+# Conventional Commit history plus the CHANGELOG entry it generated. Merging that PR is the act
+# that publishes a version: release-please then creates the tag and the GitHub Release.
+#
+# Nothing is verified here. The tree a release PR proposes to tag is main, and main was already
+# compiled by release-gate.yml on the push that created it — a release PR only ever touches
+# CHANGELOG.md and version.txt, never a module. See AGENTS.md "Why the release PR has no CI".
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maintain the release PR (and release when it merges)
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
