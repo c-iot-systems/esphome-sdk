@@ -1,0 +1,37 @@
+# Fixture: hds_v1_1 with SW1 DISABLED and the serial console ON -- the second row of the README's
+# "Pick one" table, and the path that had no coverage. It omits controls.yaml deliberately: with SW1
+# removed nothing references button_restart / button_factory, which is exactly the README's claim.
+# The flag is a quoted string here on purpose -- a consumer passing substitutions programmatically
+# (ESPHome's own `-s` always yields strings) cannot produce a YAML boolean. Sibling:
+# hds_v1_1_sw1.yaml, which exercises the enabled default.
+substitutions:
+  device_name: hds-v1-1-sw1-disabled-testdev
+  firmware_version: "0.0.0-test"
+  hds_v1_1_sw1_enabled: "false"
+  logger_level: INFO
+  logger_baud_rate: "115200"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_port: "8883"
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}

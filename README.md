@@ -573,11 +573,17 @@ trade-off must be a deliberate choice, SW1 is wired in the board file behind a s
 requirement is exactly one file per hardware.
 
 The flag works through ESPHome's `!remove`: SW1 is declared with a stable `id: sw1_button`, and a
-second `binary_sensor` item carries `id: !remove '${not hds_v1_1_sw1_enabled and "sw1_button"}'`.
+second `binary_sensor` item carries
+`id: !remove '${"sw1_button" if hds_v1_1_sw1_enabled | string | lower in ["false", "0", ""] else false}'`.
 The substitution pass expands substitutions inside a `!remove` value and evaluates the expression, so
-the flag `false` makes the target resolve to `sw1_button` and SW1 (with its `on_click`) is dropped;
-the flag `true` makes it resolve to the string `false`, which matches no id and is a no-op, so SW1
-stays. It is a flag rather than a commented-out block because the SDK is consumed as a **remote git
+a falsy flag makes the target resolve to `sw1_button` and SW1 (with its `on_click`) is dropped;
+anything else resolves to the string `false`, which matches no id and is a no-op, so SW1 stays.
+
+The comparison is against the **falsy spellings** rather than a truthiness test, because a
+consumer's substitutions are frequently strings and a non-empty string is truthy. ESPHome's own
+`-s key value` always yields a string, so a truthiness test made the flag impossible to set from the
+command line — `-s hds_v1_1_sw1_enabled false` left SW1 enabled with no error. A YAML boolean
+`false`, the string `"false"` (any case), `"0"` and `""` all disable SW1 now. It is a flag rather than a commented-out block because the SDK is consumed as a **remote git
 package** — a device cannot edit or comment `hds_v1_1.yaml` at all, but it can set a substitution in
 its own config.
 
@@ -586,7 +592,7 @@ Pick **one** in the device's own config:
 | Goal | `hds_v1_1_sw1_enabled` | `logger_baud_rate` | `controls.yaml` |
 |---|---|---|---|
 | **normal device** | `true` (default) | `0` (default — console off) | required |
-| **reading serial logs** | `false` (unquoted) | a real rate, e.g. `115200` | not needed |
+| **reading serial logs** | `false` (or `"false"` / `"0"` / `""`) | a real rate, e.g. `115200` | not needed |
 
 - In the **normal** row SW1 works and the console is off, because GPIO1 (U0TXD) is taken by the
   button. `controls.yaml` is required because SW1's `on_click` presses `button_restart` on a short
@@ -594,11 +600,11 @@ Pick **one** in the device's own config:
 - In the **reading serial logs** row SW1 is removed, GPIO1 stays on the UART and the console prints.
   A device sets `hds_v1_1_sw1_enabled: false` **plus** a real `logger_baud_rate`.
 
-Two footguns to know:
+Both rows are covered by validate fixtures: `hds_v1_1_sw1.yaml` (enabled, the default) and
+`hds_v1_1_sw1_disabled.yaml` (disabled, console on, and no `controls.yaml`).
 
-- **Set the flag as an unquoted boolean.** The string `"false"` is **truthy** in the expression
-  (`not "false"` is false), so `hds_v1_1_sw1_enabled: "false"` leaves SW1 **enabled**. Write
-  `hds_v1_1_sw1_enabled: false`.
+One footgun to know:
+
 - **A mistyped flag name (or id) is a silent no-op** — the `!remove` matches nothing and SW1 stays
   enabled, with no error. Check the generated config if you expected the console back and it is still
   silent.
