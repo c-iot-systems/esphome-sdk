@@ -1,0 +1,75 @@
+name: release-gate
+
+# The real `esphome compile` over every validate fixture, on the tree that a release PR will
+# propose to tag.
+#
+# WHY HERE AND NOT ON THE RELEASE PR: a release PR is opened by release-please using GITHUB_TOKEN,
+# and events raised by GITHUB_TOKEN do not start workflow runs — that PR gets no CI. Gating main
+# instead loses nothing, because a release PR only ever edits CHANGELOG.md and version.txt: the
+# YAML it proposes to tag is exactly the main this job compiled.
+#
+# WHY IT IS NOT ENOUGH TO COMPILE ON THE TAG (what release.yml does): by then the tag exists, is
+# public and is permanent. A failure there does not prevent a broken release, it only reports one.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/**'
+      - 'hardware/**'
+      - 'components/**'
+      - 'tests/validate/**'
+      - 'scripts/**'
+      - '.github/workflows/release-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ESPHOME_VERSION: "2026.5.1"
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # A cold PlatformIO toolchain download dominates this job; the key pins the ESPHome version
+      # so a bump re-primes the cache instead of reusing a stale toolchain.
+      - name: Cache the PlatformIO toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-esphome-${{ env.ESPHOME_VERSION }}
+          restore-keys: pio-${{ runner.os }}-esphome-
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: Materialize the main SHA into validate fixtures
+        run: bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
+
+      - name: esphome compile over validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures — nothing to compile."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "== esphome compile $f =="
+            esphome compile "$f"
+          done
