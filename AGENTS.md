@@ -42,15 +42,16 @@ patch, both in `release-please-config.json`.)
 ## How a release happens
 
 1. You merge ordinary PRs into `main` with conventional subjects.
-2. `release-gate.yml` runs on that push: job `compile` builds every validate fixture and job
-   `gates` re-runs every invariant script, including the contract gate against the last published
-   tag. Only then does release-please refresh the release PR holding the computed version and
+2. `release-gate.yml` runs on that push: `compile` builds every validate fixture (one job each, in
+   parallel), `negative` runs the executable negative harness, and `gates` re-runs every invariant
+   script including the contract gate against the last published tag. Only then does release-please refresh the release PR holding the computed version and
    CHANGELOG entry.
 3. You read that PR — the version and the changelog are the reviewable artifact — and merge it.
 4. That merge is another push to `main`, so `release-gate.yml` runs again on the exact commit about
-   to be tagged. The `release` job needs both `compile` and `gates`, so **if that tree does not
+   to be tagged. The `release` job needs `compile`, `negative` and `gates`, so **if that tree does not
    build, or violates an invariant, or its contract change is not labelled honestly, no tag is ever
-   created.** When both pass, release-please creates the tag and the GitHub Release.
+   created** — `needs` treats the compile matrix as a unit, so one failing fixture blocks the
+   release just as a failing single job would. When both pass, release-please creates the tag and the GitHub Release.
 
 ### Only the run that verified a commit may publish it
 
@@ -141,7 +142,7 @@ core, and is correctly not required.
 | workflow | trigger | does |
 |---|---|---|
 | `validate.yml` | pull request | all gates + `esphome config` over `tests/validate/` |
-| `release-gate.yml` | push to `main` | jobs `compile` (real `esphome compile`) and `gates` (every invariant script + contract gate vs the last published tag), then job `release` (release-please) which **needs** both |
+| `release-gate.yml` | push to `main` | `discover` → `compile` (one parallel job per fixture, real `esphome compile`), plus `negative` and `gates` (every invariant script + contract gate vs the last published tag); then `release` (release-please), which **needs** all three |
 | `release.yml` | tag push / manual | belt-and-braces compile against an already-published tag |
 
 ## House style
