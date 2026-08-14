@@ -31,7 +31,7 @@ override it.
 
 ## Supported scope: ESP32 only
 
-The public SDK covers **xtensa-esp32 and xtensa-esp32s3** only. riscv32 (`mr60bha2dev`) and ESP8266
+The public SDK covers **xtensa-esp32** only. riscv32 (`mr60bha2dev`) and ESP8266
 (`r`, `esp12`, `nodemcu32`) are out of scope and are never compile-tested here —
 `ota.yaml`'s `http_request` OTA, `preferences` and parts of `wifi.yaml` genuinely differ on ESP8266.
 Anyone using the SDK on an ESP8266 is off the supported path. ESP8266 can be added later if
@@ -43,7 +43,6 @@ Supported hardware:
 |---|---|---|---|
 | `hds_v1_0` | `pico32` | `esp32` | `${framework_variant}` (default esp-idf) |
 | `hds_v1_1` | `esp32dev` | `esp32` | `${framework_variant}` (default esp-idf) |
-| `hds_v2_0` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) |
 
 Each board is a single file whose esp32 framework is the `framework_variant` substitution, so one
 board file serves both frameworks. The default is **esp-idf**; a device that wants the arduino
@@ -89,7 +88,7 @@ the modules it imports.
 | `ota_http_server_test` | no | `${ota_http_server}` _(convenience)_ | *(`ota.yaml`)* test/staging OTA host — see below |
 | `logger_level` | no | `NONE` _(safety)_ | logging is **off by default** — see below |
 | `logger_baud_rate` | no | `0` _(safety)_ | `0` **disables** the serial console (skips UART init) — see below |
-| `logger_hardware_uart` | no | `UART0` _(convenience)_ | logger UART; ESP32-S3 also accepts `USB_CDC` / `USB_SERIAL_JTAG` — see below |
+| `logger_hardware_uart` | no | `UART0` _(convenience)_ | logger UART; `UART0` is the only console these boards can use — see below |
 | `diagnostics_update_interval` | no | `60s` _(convenience)_ | *(`diagnostics.yaml`)* cadence for debug sensors a device attaches to the `debug` component — see below |
 
 Defaults are tagged **_(safety)_** or **_(convenience)_**. A **safety** default encodes a deliberate
@@ -216,11 +215,11 @@ substitutions:
   logger_baud_rate: "115200"  # AND open the UART console — both are required
 ```
 
-`logger_hardware_uart` selects which UART the console uses. It defaults to **`UART0`** (valid on
-every ESP32 variant); on the **ESP32-S3** (`hds_v2_0`) it additionally accepts `USB_CDC` and
-`USB_SERIAL_JTAG`.
+`logger_hardware_uart` selects which UART the console uses. It defaults to **`UART0`**, which is the
+only console the supported boards can actually use: `UART1`/`UART2`'s default pins are wired to flash
+on these modules and the logger schema exposes no `tx_pin` override.
 
-**Classic ESP32 (`hds_v1_0`, `hds_v1_1`): a serial console and a GPIO1 button are mutually
+**A serial console and a GPIO1 button are mutually
 exclusive — a hardware constraint, not a configuration choice.** `UART0`'s TX is **GPIO1 (U0TXD)**,
 the same pin `hds_v1_1`'s on-board **SW1** button uses. `UART1`/`UART2`'s default pins are wired to
 flash on typical modules and the logger schema exposes no `tx_pin` override, so there is no way to
@@ -229,9 +228,7 @@ SW1 `binary_sensor` exists, so the baud rate is *not* the SW1 opt-out. The opt-o
 compile-time **`hds_v1_1_sw1_enabled`** flag: set it `false` (unquoted) to drop SW1, and a device that
 needs serial logs also sets a real `logger_baud_rate` (see the [SW1 / GPIO1](#sw1--gpio1--gated-by-a-compile-time-flag)
 section for the full table). `esphome config` cannot catch the pin overlap — it is a
-physical-pin conflict the schema never sees — so it is stated here as a hardware fact. On the
-**ESP32-S3 `hds_v2_0`** there is no conflict: set `logger_hardware_uart: USB_SERIAL_JTAG` with a real
-`logger_baud_rate` and the console uses the built-in USB peripheral, no UART pins.
+physical-pin conflict the schema never sees — so it is stated here as a hardware fact.
 
 ### Required substitutions fail loudly — the guard idiom
 
@@ -544,12 +541,10 @@ exactly one hardware module. The ESP32-only scope excludes the `mr60bha2dev`, `r
 |---|---|---|---|---|
 | `hds_v1_0.yaml` | `pico32` | `esp32` | `${framework_variant}` (default esp-idf) | v1.0 |
 | `hds_v1_1.yaml` | `esp32dev` | `esp32` | `${framework_variant}` (default esp-idf) | v1.1 |
-| `hds_v2_0.yaml` | `esp32-s3-devkitc-1` | `esp32s3` | `${framework_variant}` (default esp-idf) | v2.0 (ESP32-S3) |
 
 - `hds_v1_0.yaml` — CAN termination resistor on GPIO12.
 - `hds_v1_1.yaml` — the CAN termination resistor on GPIO12, and the on-board SW1 button on GPIO1
   gated by the compile-time `hds_v1_1_sw1_enabled` flag (default `true`; see "SW1 / GPIO1" below).
-- `hds_v2_0.yaml` — the ESP32-S3 board definition only; the v2.0 board has no fixed on-board I/O.
 
 **CAN termination — `can_resistor_status`.** `hds_v1_0` and `hds_v1_1` carry the CAN bus
 termination resistor and own an optional `can_resistor_status` substitution (default `ALWAYS_ON`)
@@ -648,8 +643,7 @@ One footgun to know:
 It is a **compile-time** choice: switching sides changes which firmware is built, so it needs a
 **rebuild**, not live pin multiplexing. Do **not** work around the conflict by relocating SW1 to a
 spare pin — a floating input can spuriously fire, and SW1's handlers press restart / factory-reset.
-(On the ESP32-S3 `hds_v2_0` the trade-off does not arise — its console can use `USB_SERIAL_JTAG`,
-which needs no UART pins.) See the "serial console" note under
+See the "serial console" note under
 [Logging](#logging-is-off-in-production-by-default).
 
 #### Slot pin tables — `slot_<n>_<module>_<signal>`

@@ -307,7 +307,7 @@ _range_declares_breaking() {
 # Compare two already-extracted surfaces. Prints the classified diff; returns 0 if the change is
 # non-breaking, 1 if it is breaking.
 compare_surfaces() {
-  local base_s="$1" head_s="$2" breaking=0 key val oval scope name
+  local base_s="$1" head_s="$2" breaking=0 key val oval scope name n
   local tmp; tmp="$(mktemp -d)"
 
   # keys are "<scope> <name>"; optional entries keep their default in field 2 after the tab.
@@ -318,14 +318,22 @@ compare_surfaces() {
   cut -f1 "$tmp/bopt" | sort -u >"$tmp/boptn"; cut -f1 "$tmp/hopt" | sort -u >"$tmp/hoptn"
 
   _describe() { scope="${1%% *}"; name="${1#* }"; printf "'%s' (%s)" "$name" "$scope"; }
+  # True when the key's scope is a file that was removed outright — already reported as a path.
+  _scope_gone() { [ -s "$tmp/goneScopes" ] && grep -qxF "${1%% *}" "$tmp/goneScopes"; }
 
   # a removed or renamed module/board path breaks every config importing it.
   sed -nE 's/^path (.*)$/\1/p' "$base_s" | sort -u >"$tmp/bpath"
   sed -nE 's/^path (.*)$/\1/p' "$head_s" | sort -u >"$tmp/hpath"
+  # Scopes whose whole file went away. Their substitutions are reported as the ONE path removal
+  # rather than one line each: a deleted board file takes ~110 substitutions with it, and listing
+  # them individually buries every other finding in the diff.
+  : >"$tmp/goneScopes"
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     grep -qxF "$key" "$tmp/hpath" && continue
-    echo "check-contract-diff: BREAKING — module path '${key}' was removed or renamed — every config importing it fails"
+    echo "$key" >>"$tmp/goneScopes"
+    n="$(grep -cE "^(required|optional) ${key//./\\.} " "$base_s" 2>/dev/null || true)"
+    echo "check-contract-diff: BREAKING — module path '${key}' was removed or renamed — every config importing it fails (and the ${n:-0} substitution(s) it declared go with it)"
     breaking=1
   done <"$tmp/bpath"
   while IFS= read -r key; do
@@ -338,6 +346,7 @@ compare_surfaces() {
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     grep -qxF "$key" "$tmp/hreq" && continue
+    _scope_gone "$key" && { breaking=1; continue; }
     if grep -qxF "$key" "$tmp/hoptn"; then
       echo "check-contract-diff: ok — required $(_describe "$key") gained a default (relaxation)"
     else
@@ -363,6 +372,7 @@ compare_surfaces() {
     [ -n "$key" ] || continue
     grep -qxF "$key" "$tmp/hoptn" && continue
     grep -qxF "$key" "$tmp/hreq" && continue   # already reported as "lost its default"
+    _scope_gone "$key" && { breaking=1; continue; }
     echo "check-contract-diff: BREAKING — optional substitution $(_describe "$key") was removed or renamed — a config that sets it is now silently ignored"
     breaking=1
   done <"$tmp/boptn"
@@ -539,7 +549,7 @@ _expect_gate() {
 }
 
 self_test() {
-  local tmp rc=0 parity_out
+  local tmp rc=0 parity_out lines
   tmp="$(mktemp -d)"
 
   # --- extraction ---------------------------------------------------------------------------
@@ -705,6 +715,15 @@ YAML
   printf 'path modules/controls.yaml\npath modules/core.yaml\n' >"$tmp/p_before"
   printf 'path modules/core.yaml\n'                              >"$tmp/p_after"
   _expect_cmp breaking "$tmp/p_before" "$tmp/p_after" "removing a module path is breaking" || rc=1
+  # A deleted file takes its substitutions with it; that must read as ONE finding, not one per key.
+  printf 'path modules/gone.yaml\noptional modules/gone.yaml a = 1\noptional modules/gone.yaml b = 2\nrequired modules/gone.yaml c\npath modules/core.yaml\n' >"$tmp/g_before"
+  printf 'path modules/core.yaml\n' >"$tmp/g_after"
+  lines="$(compare_surfaces "$tmp/g_before" "$tmp/g_after" | grep -c 'BREAKING' || true)"
+  if [ "$lines" = "1" ]; then
+    echo "self-test: PASS — deleting a file reports one path finding, not one per substitution"
+  else
+    echo "self-test: FAILED — expected 1 BREAKING line for a deleted file, got ${lines}"; compare_surfaces "$tmp/g_before" "$tmp/g_after"; rc=1
+  fi
   _expect_cmp ok "$tmp/p_after" "$tmp/p_before" "adding a module path is non-breaking" || rc=1
 
   # --- negative-harness parity ----------------------------------------------------------------

@@ -1,11 +1,14 @@
-# Fixture: logger_baud_rate and logger_hardware_uart at NON-default values. It rides the S3 because
-# USB_SERIAL_JTAG takes no board GPIO; the classic console-on path is hds_v1_1.yaml.
+# Fixture: the console-ON path — logger_level and logger_baud_rate at NON-default values. It rides
+# hds_v1_0, which has no SW1, so opening the UART console costs nothing: on hds_v1_1 the console and
+# the GPIO1 button are mutually exclusive. logger_hardware_uart is pinned to its default UART0 on
+# purpose — UART1/UART2's default pins are wired to flash on these modules and the logger schema
+# exposes no tx_pin override, so UART0 is the only console a classic ESP32 board can actually use.
 substitutions:
   device_name: logger-console-testdev
   firmware_version: "0.0.0-test"
   logger_level: INFO
   logger_baud_rate: "115200"
-  logger_hardware_uart: USB_SERIAL_JTAG
+  logger_hardware_uart: UART0
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
@@ -22,7 +25,7 @@ packages:
     url: https://github.com/c-iot-systems/esphome-sdk
     ref: __SDK_REF__
     files:
-      - path: hardware/hds_v2_0.yaml
+      - path: hardware/hds_v1_0.yaml
       - path: modules/core.yaml
         vars: {sdk_ref: __SDK_REF__}
       - path: modules/wifi.yaml
