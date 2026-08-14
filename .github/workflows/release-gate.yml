@@ -1,25 +1,21 @@
 name: release-gate
 
-# The real `esphome compile` over every validate fixture, on the tree that a release PR will
-# propose to tag.
+# Compile, then release — in that order, in ONE workflow, so the second cannot happen without the
+# first.
 #
-# WHY HERE AND NOT ON THE RELEASE PR: a release PR is opened by release-please using GITHUB_TOKEN,
-# and events raised by GITHUB_TOKEN do not start workflow runs — that PR gets no CI. Gating main
-# instead loses nothing, because a release PR only ever edits CHANGELOG.md and version.txt: the
-# YAML it proposes to tag is exactly the main this job compiled.
+# The ordering is the whole point. A tag here is permanent, public and pinned by devices in the
+# field, so the compile has to run while the version is still only a proposal. Two independent
+# workflows could not give that: release-please would create the tag on the release PR's merge
+# regardless of whether the compile of that same commit had passed, or even finished. As one
+# workflow with `needs: compile`, the release job is simply never reached unless the tree being
+# tagged compiled — including on the release PR's own merge commit, which is the commit that gets
+# tagged.
 #
-# WHY IT IS NOT ENOUGH TO COMPILE ON THE TAG (what release.yml does): by then the tag exists, is
-# public and is permanent. A failure there does not prevent a broken release, it only reports one.
+# This is why there is no `paths:` filter. A release PR only edits CHANGELOG.md and version.txt,
+# so a filter would skip the compile on exactly the push that publishes the tag.
 on:
   push:
     branches: [main]
-    paths:
-      - 'modules/**'
-      - 'hardware/**'
-      - 'components/**'
-      - 'tests/validate/**'
-      - 'scripts/**'
-      - '.github/workflows/release-gate.yml'
   workflow_dispatch:
 
 permissions:
@@ -28,9 +24,11 @@ permissions:
 env:
   ESPHOME_VERSION: "2026.5.1"
 
+# Never cancel in flight: a cancelled run is a run whose release job never happened, and the next
+# push would have to re-do it. Queue instead.
 concurrency:
   group: release-gate-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   compile:
@@ -58,7 +56,9 @@ jobs:
         run: pip install "esphome==${ESPHOME_VERSION}"
 
       - name: Materialize the main SHA into validate fixtures
-        run: bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
+        run: |
+          bash scripts/materialize-sdk-ref.sh --self-test
+          bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
 
       - name: esphome compile over validate fixtures
         run: |
@@ -73,3 +73,18 @@ jobs:
             echo "== esphome compile $f =="
             esphome compile "$f"
           done
+
+  release:
+    needs: compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Maintains the release PR — the version release-please computed from the Conventional Commit
+      # history, plus the CHANGELOG it generated. When that PR merges, this same job (on the merge
+      # commit, after its compile) creates the tag and the GitHub Release.
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
