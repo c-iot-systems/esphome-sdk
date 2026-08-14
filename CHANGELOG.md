@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.2...v0.2.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mqtt:** `mqtt_broker`, `mqtt_port` and `mqtt_ca_certificate` are no longer caller-supplied and are replaced by a required `criotive_env` (`prod` or `hmg`). A consuming config drops the three substitutions and adds `criotive_env`. Credentials are unchanged: `mqtt_username` and `mqtt_password` stay required with no defaults.
+
+### Features
+
+* **mqtt:** pin the broker per environment with criotive_env and ship both CAs ([24c7df8](https://github.com/c-iot-systems/esphome-sdk/commit/24c7df8a8ce0bab852f1ed3c6137847e5d81cadc))
+
+
+### Documentation
+
+* **mqtt:** state the internal substitutions plainly instead of claiming a mismatch is unrepresentable ([616dffc](https://github.com/c-iot-systems/esphome-sdk/commit/616dffcd4135d6067b8f41ba5dacef6762e7114c))
+
 ## [0.1.2](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.1...v0.1.2) (2026-08-14)
 
 
