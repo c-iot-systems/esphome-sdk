@@ -1,11 +1,24 @@
 # Negative fixtures — configs that MUST fail `esphome config`
 
-Each file here breaks **exactly one** rule of the substitution contract — it either omits a required
-substitution or half-fills a WiFi station slot — and therefore must make `esphome config` exit
-non-zero. They are the proof that the contract is enforced: if any of these were to *succeed*, a
-required input silently gained a default — exactly the "public default password in every device"
-failure the contract forbids. `scripts/check-negative.sh` runs `esphome config` over
-every file here and fails if any one succeeds; it is wired into `validate.yml`.
+Each file here breaks **exactly one** rule the SDK enforces at config time, and therefore must make
+`esphome config` exit non-zero. `scripts/check-negative.sh` runs `esphome config` over every file
+here and fails if any one succeeds; it is wired into `validate.yml`.
+
+Two kinds of rule live here:
+
+- **The substitution contract** — `omit_*.yaml` omits a required substitution, `orphan_wifi_*.yaml`
+  half-fills a WiFi station slot. These are the proof the contract is enforced: if one were to
+  *succeed*, a required input silently gained a default — exactly the "public default password in
+  every device" failure the contract forbids. `check-contract-diff.sh --negative-parity` holds this
+  set in step with the required substitutions derived from `modules/`, so it looks at `omit_*.yaml`
+  and nothing else.
+- **Component invariants** — a rule a component enforces in its own `CONFIG_SCHEMA`, which has no
+  substitution to omit. `ack_button_shared_topic.yaml` and `ack_button_wildcard_topic.yaml` are the
+  first: an `ack_button` whose acknowledgement would land back on its own subscription must not
+  validate. These are named after the component and the invariant, never `omit_*`, so the parity
+  gate keeps ignoring them. They source the component through a **local** `external_components`
+  path rather than `modules/ack_button.yaml`, because that module fetches over git — a fixture that
+  failed on an unreachable ref would pass this suite while proving nothing.
 
 Unlike the positive fixtures in `tests/validate/`, these import the modules with a **local
 `!include`** (`../../modules/*.yaml`) rather than the GitHub `packages:` path. That keeps them

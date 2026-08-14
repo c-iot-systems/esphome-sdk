@@ -1,0 +1,82 @@
+# Fixture: the ack_button platform composed the way a device composes it — on top of
+# core + wifi + criotive_mqtt. MQTT is not optional here: without it the companion
+# class is never instantiated, and release CI would compile the button while leaving
+# the ack, the subscription and the discovery override unbuilt.
+#
+# Three buttons on purpose. `open_door` is the ordinary case. `internal_ack_button`
+# proves MQTTComponent::call_setup() returns before setup() for an internal entity, so
+# it neither subscribes nor acknowledges. `custom_topic_button` proves the stock
+# `state_topic:`/`command_topic:` overrides still reach our companion through
+# register_mqtt_component().
+substitutions:
+  device_name: ack-button-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_port: "8883"
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
+  # criotive_mqtt's on_connect stops ota.yaml's script_rollback by id, so the two
+  # modules cannot be imported apart.
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+switch:
+  - platform: template
+    id: relay_stub
+    name: "Relay"
+    optimistic: true
+
+button:
+  - platform: ack_button
+    name: "Open Door"
+    id: open_door
+    on_press:
+      - then:
+          - switch.turn_on: relay_stub
+
+  - platform: ack_button
+    name: "Internal Ack Button"
+    id: internal_ack_button
+    internal: true
+
+  - platform: ack_button
+    name: "Custom Topic Button"
+    id: custom_topic_button
+    state_topic: ack-button-testdev/custom/ack
+    command_topic: ack-button-testdev/custom/press
+    icon: mdi:gesture-tap-button
+    entity_category: config
+
+binary_sensor:
+  # A physical press runs the same Button::press(), so this path acknowledges too.
+  - platform: gpio
+    pin: GPIO4
+    name: "Door Button"
+    on_press:
+      - then:
+          - button.press: open_door
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ack_button.yaml
+        vars: {sdk_ref: __SDK_REF__}

@@ -495,6 +495,60 @@ restructuring the others.
 - `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
 - `location.yaml` — `google_location` and its `external_components`.
 
+### Optional entity modules
+
+Not drivers for hardware, but entity platforms that change how an entity behaves on the wire. Like
+the hardware modules they declare only their `external_components` source, pinned to `${sdk_ref}`;
+the entities themselves stay in the device's own config.
+
+- **`ack_button.yaml` — a button that acknowledges its press on the state topic.** A stock ESPHome
+  button is write-only: `mqtt_button.cpp` sets `SendDiscoveryConfig::state_topic = false` and the
+  component never publishes, because Home Assistant models a button as a trigger with no state. The
+  criotive platform disagrees — it binds a discovered component to its `state_topic` and confirms a
+  command by reading telemetry back from it, so an awaited press on a stock button can only ever
+  time out. **Import it when** the platform (or any consumer) needs to know a button press
+  landed. Then declare buttons with `platform: ack_button` instead of `platform: template`:
+
+  ```yaml
+  button:
+    - platform: ack_button
+      name: "Abrir Solenoide"
+      on_press:
+        - then:
+            - switch.turn_on: solenoide
+  ```
+
+  It is the stock button in every other respect. The schema, entity registration and the
+  `button.press:` action all come from `esphome.components.button` unmodified, so every option a
+  button accepts — `icon`, `device_class`, `entity_category`, `internal`, `disabled_by_default`,
+  `qos`, `retain`, `availability`, `state_topic`, `command_topic` — works here too, and an ESPHome
+  release that adds one adds it here on the same day. The only override is the MQTT companion class,
+  swapped through the `mqtt_id` the button schema already declares.
+
+  Four behaviours are worth knowing:
+
+  - **Every press acknowledges**, not only one arriving on the command topic. A physical input
+    firing `button.press:` and an automation pressing it publish the same `PRESS`, the way a switch
+    publishes its state whatever moved it.
+  - **The ack is published before the `on_press:` automations run**, because it happens in
+    `press_action()` and `Button::press()` calls that first. An automation that blocks — or never
+    returns — therefore cannot leave a press unacknowledged. This is ordering, not delivery:
+    `publish()` queues the message and the client still has to reach the socket, so an automation
+    that reboots or cuts power in the same loop iteration can still cut it off in flight. For those,
+    keep the `- delay: 500ms` idiom `controls.yaml` uses in front of every shutdown and restart.
+  - **The ack is not retained**, unlike every other MQTT entity's state. A press is an event, and a
+    retained `PRESS` would be redelivered to every future subscriber, so each reconnect would read
+    as a fresh press. An explicit `retain: true` still wins if a device wants the old behaviour.
+  - **A config whose ack lands on its own subscription is rejected**, because MQTT has no no-local
+    option: the broker would echo each ack back as a new press and the button would run forever.
+    The defaults can never collide, so this only bites a device that overrides the topics — and it
+    catches wildcards, not just equal strings, since `command_topic` is a subscription filter and
+    `.../+` swallows an ack as surely as `.../state` does. Lambda topics are resolved on device and
+    cannot be checked here.
+
+  With no `mqtt:` in the config there is no companion and this is an ordinary button,
+  indistinguishable from `platform: template`.
+
 ### Optional hardware modules
 
 A device imports one of these **only if it has that hardware** — they are drivers, not business
