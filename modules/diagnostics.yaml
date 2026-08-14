@@ -1,5 +1,10 @@
 debug:
-  update_interval: 0s
+  # `never`, not `0s`: ESPHome coerces a 0ms interval to 1ms (and warns that a
+  # literal 0ms would spin the main loop into a watchdog reset), so `0s` polled
+  # every device at 1 kHz. Nothing is lost -- the text sensors below publish
+  # from dump_config() at boot, and DebugComponent::update() only touches the
+  # free-heap / loop-time / cpu-frequency sensors, none of which are declared.
+  update_interval: never
 
 text_sensor:
   - platform: debug

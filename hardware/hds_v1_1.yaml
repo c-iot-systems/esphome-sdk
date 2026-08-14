@@ -206,4 +206,8 @@ binary_sensor:
           - logger.log: "Factory"
           - delay: 1s
           - button.press: button_factory
-  - id: !remove '${not hds_v1_1_sw1_enabled and "sw1_button"}' # Frees GPIO1 for UART0.
+  # Frees GPIO1 for UART0. Compares against the falsy spellings rather than
+  # testing truthiness: substitutions supplied by a consumer are often strings
+  # (ESPHome's own `-s` always is), and the string "false" is truthy -- so a
+  # truthiness test left SW1 enabled and the console silent, with no error.
+  - id: !remove '${"sw1_button" if hds_v1_1_sw1_enabled | string | lower in ["false", "0", ""] else false}'
