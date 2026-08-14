@@ -1,4 +1,71 @@
 substitutions:
+  # The deployment this device talks to: `prod` or `hmg`. It is the ONLY broker knob — host, TLS
+  # port and trust anchor are all derived from it below, so an SDK device cannot be pointed at a
+  # broker we do not run without editing its own config outside the package.
+  #
+  # Two failure modes, both loud and both at validation time rather than at runtime:
+  #   * the substitution is missing  -> this guard divides by zero, naming `criotive_env`;
+  #   * the value is not one we know -> the `else 1/0` branch of each mapping below does the same.
+  criotive_env_selected: "${ criotive_env if criotive_env is defined else 1/0 }"
+
+  # Trust anchors, one per environment, taken from the self-signed root each broker presents in its
+  # own TLS chain. They are NOT interchangeable: prod is `CN = c-iot Hub CA` (RSA-4096) and hmg is
+  # `CN = HMG Root CA` (RSA-2048), different keys signing different brokers. Both are public
+  # material — a CA certificate is what the broker hands to anyone who opens a TLS connection.
+  #
+  # Only the selected one is emitted into the binary; the mapping resolves at config time, so the
+  # unused environment costs no flash.
+  criotive_ca_prod: |
+    -----BEGIN CERTIFICATE-----
+    MIIFITCCAwmgAwIBAgIUMXBJtfr05RFe9Uq1xH+OQZgwC/4wDQYJKoZIhvcNAQEL
+    BQAwFzEVMBMGA1UEAwwMYy1pb3QgSHViIENBMCAXDTI0MDgxNTAyMTYwM1oYDzIx
+    MjcwNDE4MDIxNjAzWjAXMRUwEwYDVQQDDAxjLWlvdCBIdWIgQ0EwggIiMA0GCSqG
+    SIb3DQEBAQUAA4ICDwAwggIKAoICAQC5pVvoudhZ3VhTxirOz6TkYZIU6RDlwmO3
+    +1nevQU0o60fGc8iMt4xZ2gop1uzH7S2suTvDYomDDcftG3pAupwn41VYs111oBP
+    D5u2TMKABk956ASvv1m3+kFo7GMMId+ciy5W08zMP9Mk62ygnPA8fKRPQUPKk5wn
+    FEtcsFvrRDv1SnCDJF60GToKa3ZdQlZG+RSCRDdZpxsaJIqtCNEPPlz9F/PaZdzo
+    tZK/OTOfFTI8pR/IgXa0Adb4hz6eMzFF4zDCtu4dTILgPeDj8uMwE4jMGUr0gKhu
+    tr3R+aZtTEHnQHmBvhSF1S9DOF5/5b2NoN61rJnMM2299EcnIf68uQArg325PMK1
+    tUCI8qUQGFaVsLHZxE8FzyuOy6OvoDmpFuyETPqvjke7VhOOvOmgUtFIG/PIepfk
+    hjoHj8ej0vD+x9hMWGl1OqXVw5Iuk1eP3ijRP0ePHkZXYaxmnrTbEcc4DDeYW3WL
+    GFnsvl0MKn8K7fmbL37ypI+Cbh5pTAhvRI2azX4E/AEnyab1pTlUvKGQQNoeCgIK
+    PVMH2/j7qd8/l3y2TOF3lDX+M2jmE8oiDN0KVaIiD5bTa8pBQCqgT2cpRaqHw4Yb
+    6Ib9KpAz4waRnYcSl9aulCif58ajFPUqVUwbE/r8Ox+QXz1IY6yBH94BcpNOLgR5
+    4t/cx/Y61QIDAQABo2MwYTAdBgNVHQ4EFgQUnnQZfh3SMD1jocfBfCLqwAojxGMw
+    HwYDVR0jBBgwFoAUnnQZfh3SMD1jocfBfCLqwAojxGMwDwYDVR0TAQH/BAUwAwEB
+    /zAOBgNVHQ8BAf8EBAMCAYYwDQYJKoZIhvcNAQELBQADggIBALKck6FYOXFJ/5NN
+    dUtyurBNxrKHHGFVOVwgfGPZBSfzy2D9SY6qhhjyC1D0GcsefrFeNGTD6Ki+yMrY
+    tIfSdr485z1QUBfzm+G7P+vEjIUjpoLNYgCcyvo704+CgX2eWGfx7skPDrICh2fK
+    VKX8lhiXHGHRYSslkkGoZEp5K+MWNrfJiqoyZvf4fUIYrdjWewri9wt7QfjfTzaW
+    ziE1RFvrw5x+fGXyk68nLvnsuiVuoXfQvjnQu0aStBi27De/XXEaNArRVIwJjIvE
+    frqRZDbZRcrRwGh3ohMdRf2yrsmuo3rqsrCIWZKhTKSvgEHR2hBNQt7PGGvjgr1m
+    WXjV/KyCthKdaqc8c9APmR/FW3A5ldQcPjv6ZhrSWcFdtcWXFJgPvfjaE6xGXP7/
+    FtkIMkaXs8PzG+sHXTi3oLd41nt4/h0BTVWu5+tgtPrAfIktZhnAqurbiFdYfDPE
+    3ARYCehs922wNnwyJKVoyDb5DN14BmEGEuW4GC9ULr1mbongAw9DGv2z5yZAETGn
+    v3FaIlJ0K1ufXOY87JhTNxqX+K4neIUVzdsdrBSDnocYqaqgWRSpTxw5Lkz58Ypg
+    e5PpKTUZmlJYyJs0FViKu87SWUkVYUexdyhUFypaReXHBdUJh/OUoqXfF7nAiskw
+    jUHTyocqxPkHTx1H/2eG8Z06aGqV
+    -----END CERTIFICATE-----
+  criotive_ca_hmg: |
+    -----BEGIN CERTIFICATE-----
+    MIIC+jCCAeKgAwIBAgIQTi7wwGROSV79zNGmt8Cr/TANBgkqhkiG9w0BAQsFADAW
+    MRQwEgYDVQQDDAtITUcgUm9vdCBDQTAgFw0yNDAzMjMxNTE2NTVaGA8yMTI0MDIy
+    ODE1MTY1NVowFjEUMBIGA1UEAwwLSE1HIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEB
+    AQUAA4IBDwAwggEKAoIBAQC17TsMIj9q3Cg2koXTM9lxC5bWcHkCWg33kTR+ztKM
+    xh/1+lNSSvPB50OHv9LyOqTys9xQgKjjFIxn5LUSXbEFtCopjHmyEjP/osa9EOvt
+    tnECUi3oPMI8Qe2Ow3+SNvXWZThveKbguhUvXhm9Sz/34ppkfeAMyU20StBRph9h
+    iYEziEykwFJpAPN3/a9jr7ptpox5yuH6UKUfsyPJJOvV7PBukrJpnXLBZ4x9hCHf
+    8mXgzWDrZjwYljbspYXzApL6gxUCDPU9lqJ7n3RqPzO5PAzTVcLkfe/M3/32JFa/
+    PKeMY83fcP9KvIs5Ss3NjvFgP4hr7TydcEgtRtUj5v3PAgMBAAGjQjBAMA8GA1Ud
+    EwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMB0GA1UdDgQWBBRmrV/+UGW49ZXQ
+    DdnHx4FrSjgruDANBgkqhkiG9w0BAQsFAAOCAQEAD8cBDcJGOhoNdRsYcyOJ/zAm
+    vVNxWoreRTMTXqgQGisBC8uHnY6pv+xJaRLU5i9xCSksR9ULjKy3hL0l6JPhqWip
+    /7OlrIpTqaSj1Ggqf/ej3lQwDWeZI4R8f27/LptdT8ix1ijGEZvxlHKxOXpeupn4
+    wDy1Nzd0F+N/TOrqwy0ppzJhDOCiPkojz1cLsVnblOei16ehtXbQPcttIqxhnITf
+    zQvmPqGud830n/SxRuLmHwAT20hcc0xy4Aedxx0E8kxQIyDwEFjY76BW2MyDrokt
+    7BXZjDCyw98MTvJZDBSzLEvirwLR4zKLAz03V4nl9F9bC4FP9IOA+KR131yDyg==
+    -----END CERTIFICATE-----
+
   mqtt_client_id: ${device_name}
   # Never reboot solely because MQTT is unavailable.
   mqtt_reboot_timeout: 0s
@@ -6,12 +73,14 @@ substitutions:
 
 mqtt:
   id: mqtt_client
-  broker: "${ mqtt_broker if mqtt_broker is defined else 1/0 }"
-  port: ${ mqtt_port if mqtt_port is defined else 1/0 }
+  broker: "${ 'broker.criotive.io' if criotive_env_selected == 'prod' else 'dev-hmg.c-iot.io' if criotive_env_selected == 'hmg' else 1/0 }"
+  # Both deployments listen for TLS on 8883. The port alone does not enable TLS — ESPHome calls
+  # set_ca_certificate only when `certificate_authority` is present — so the anchor below, not this
+  # number, is what makes the transport encrypted.
+  port: 8883
   username: "${ mqtt_username if mqtt_username is defined else 1/0 }"
   password: "${ mqtt_password if mqtt_password is defined else 1/0 }"
-  # Port 8883 alone does not enable TLS; the CA is required.
-  certificate_authority: "${ mqtt_ca_certificate if mqtt_ca_certificate is defined else 1/0 }"
+  certificate_authority: "${ criotive_ca_prod if criotive_env_selected == 'prod' else criotive_ca_hmg if criotive_env_selected == 'hmg' else 1/0 }"
   reboot_timeout: ${mqtt_reboot_timeout}
   discovery: ${mqtt_discovery}
   discover_ip: false

@@ -6,11 +6,9 @@ substitutions:
   wifi_ssid: test-ssid
   wifi_password: test-wifi-password
   wifi_ap_password: test-ap-password
-  mqtt_broker: mqtt.test.invalid
-  mqtt_port: "8883"
+  criotive_env: prod
   mqtt_username: test-mqtt-user
   mqtt_password: test-mqtt-password
-  mqtt_ca_certificate: "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----"
   ota_password: test-ota-password
   ota_http_server: ota.test.invalid/blobs/
 

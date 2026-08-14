@@ -74,9 +74,7 @@ the modules it imports.
 | `wifi_password_3` | no | *(empty)* | required once slot 3 has an SSID |
 | `wifi_ap_password` | **yes** | — | fallback AP; **no default, ever** |
 | `wifi_reboot_timeout` | no | `0s` _(safety)_ | *(`wifi.yaml`)* — `0s` **disables** the WiFi reboot (offline survival) |
-| `mqtt_broker` | **yes** | — | *(`criotive_mqtt.yaml`)* |
-| `mqtt_ca_certificate` | **yes** | — | **the TLS trust anchor — see below** |
-| `mqtt_port` | **yes** | — | *(`criotive_mqtt.yaml`)* — stated explicitly, no default; the port alone does **not** enable TLS |
+| `criotive_env` | **yes** | — | *(`criotive_mqtt.yaml`)* — `prod` or `hmg`; selects broker host, TLS port and trust anchor together — see below |
 | `mqtt_username` | **yes** | — | **no default, ever** |
 | `mqtt_password` | **yes** | — | **no default, ever** |
 | `mqtt_client_id` | no | `${device_name}` _(convenience)_ | MQTT client id; independent of `topic_prefix` — set it explicitly when a deployment needs a specific value — see below |
@@ -100,10 +98,11 @@ not be overridden without a specific reason; the same holds for the hardware-fil
 (`mqtt_client_id`, `mqtt_discovery`, `logger_hardware_uart`, `ota_http_server_test`) that a device
 overrides freely.
 
-**No credential — and now no connection port — has a default.** A default password in a public repo is
-a default password in every device that forgets to override it, and a defaulted `mqtt_port` could be
-silently wrong; a missing required substitution must fail validation loudly, and the PR-time
-`esphome config` check plus the negative-fixture harness prove it does.
+**No credential has a default.** A default password in a public repo is a default password in every
+device that forgets to override it; a missing required substitution must fail validation loudly, and
+the PR-time `esphome config` check plus the negative-fixture harness prove it does. The broker
+*address* is the opposite case and is not a credential: it is fixed by `criotive_env` rather than
+supplied per device, so there is nothing to leak and nothing to get silently wrong.
 
 ### Up to three WiFi networks — and the provisioning-only mode
 
@@ -253,14 +252,45 @@ required substitution to a free-form field must apply this guard** (`criotive_mq
 omitted, and `scripts/check-negative.sh` (wired into `validate.yml`) asserts every negative fixture
 exits non-zero.
 
-### MQTT is TLS only when a CA is configured
+### `criotive_env` — the broker, the port and the CA move together
+
+An SDK device talks to a criotive broker, and **`criotive_env` is the only knob that chooses which
+one.** It takes `prod` or `hmg`, and the module derives all three connection facts from it:
+
+| `criotive_env` | broker | port | trust anchor |
+|---|---|---|---|
+| `prod` | `broker.criotive.io` | 8883 | `CN = c-iot Hub CA` (RSA-4096) |
+| `hmg` | `dev-hmg.c-iot.io` | 8883 | `CN = HMG Root CA` (RSA-2048) |
+
+They move together because they are not independently valid: a host without its matching anchor
+cannot complete a handshake, and the two environments are signed by **different** private CAs, so
+mixing one env's host with the other's certificate fails every connection. Binding them to a single
+substitution makes that combination unrepresentable instead of merely discouraged.
+
+Both PEMs ship in `criotive_mqtt.yaml`. They are public material — a CA certificate is what a broker
+hands to anyone who opens a TLS connection — and the selection resolves at config time, so only the
+chosen environment's certificate reaches the binary and the other costs no flash.
 
 **Port `8883` does not enable TLS.** ESPHome calls `set_ca_certificate` only when
 `certificate_authority` is present in the config; without it the transport is plain TCP whatever the
-port, and a config that sets `8883` and no CA sends credentials in the clear. `criotive_mqtt.yaml`
-therefore takes a **required `mqtt_ca_certificate` substitution with no default**, wired to
-`certificate_authority`. The CA is supplied by the caller, so different deployments can select their
-own trust anchor and rotate it without an SDK release.
+port, and a config that sets `8883` and no CA sends credentials in the clear. The anchor above, not
+the port number, is what makes the transport encrypted.
+
+Both failure modes are loud and happen at validation time, never at runtime on a device in the
+field: **a missing `criotive_env`** trips the `1/0` guard naming the substitution, and **a value that
+is not a deployment we run** trips the `else 1/0` branch of each mapping, which reports the offending
+value (`criotive_env_selected = 'staging'`). `tests/negative/omit_criotive_env.yaml` and
+`tests/negative/invalid_criotive_env.yaml` pin both.
+
+This removes the *supported* path to a third-party broker; it does not prevent one. A consuming
+`main.yaml` merges over the package and can always write its own `mqtt:` keys — enforcement of who
+may connect lives at the broker, not in this repo. What the SDK guarantees is that the default,
+documented path reaches a criotive broker over TLS with the right anchor.
+
+The certificates are long-lived (the prod anchor is valid to 2127, hmg to 2124), so this repo ships
+no expiry gate: there is nothing for one to detect within the service life of any device. The change
+worth watching for is a **rotation** — an anchor reissued out of band would break every pinned device
+at once — and detecting that is a possible follow-up, not something this version does.
 
 ### `mqtt_client_id` — set it explicitly when a deployment needs a specific value
 
