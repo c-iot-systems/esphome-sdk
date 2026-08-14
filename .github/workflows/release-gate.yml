@@ -72,17 +72,33 @@ jobs:
 
       - name: esphome compile over validate fixtures
         run: |
-          set -euo pipefail
+          set -uo pipefail
           shopt -s nullglob
           files=(tests/validate/*.yaml tests/validate/*.yml)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No validate fixtures — nothing to compile."
             exit 0
           fi
+          # Compile every fixture even after one fails, then report them together. Stopping at the
+          # first failure would surface one broken fixture per run, and each run is a full
+          # toolchain build — a slow way to learn there were three.
+          failed=()
           for f in "${files[@]}"; do
-            echo "== esphome compile $f =="
-            esphome compile "$f"
+            echo "::group::esphome compile $f"
+            if esphome compile "$f"; then
+              echo "== ok: $f =="
+            else
+              echo "::error file=${f}::esphome compile failed"
+              failed+=("$f")
+            fi
+            echo "::endgroup::"
           done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::${#failed[@]} of ${#files[@]} fixture(s) failed to compile:"
+            printf '  %s\n' "${failed[@]}"
+            exit 1
+          fi
+          echo "All ${#files[@]} fixtures compiled."
 
   # EVERY gate runs again here, not just the contract one. On a pull request they are enforced by
   # validate.yml, but a direct push to main never has a pull request — and without this job a push
