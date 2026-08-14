@@ -42,14 +42,17 @@ patch, both in `release-please-config.json`.)
 ## How a release happens
 
 1. You merge ordinary PRs into `main` with conventional subjects.
-2. `release-gate.yml` runs on that push: it compiles every validate fixture **and** re-runs the
-   substitution-contract gate against the last released tag, and only then lets release-please
-   refresh the release PR holding the computed version and CHANGELOG entry.
+2. `release-gate.yml` runs on that push: job `compile` builds every validate fixture and job
+   `gates` re-runs every invariant script, including the contract gate against the last published
+   tag. Only then does release-please refresh the release PR holding the computed version and
+   CHANGELOG entry.
 3. You read that PR — the version and the changelog are the reviewable artifact — and merge it.
 4. That merge is another push to `main`, so `release-gate.yml` runs again on the exact commit about
-   to be tagged. The `release` job needs both `compile` and `contract`, so **if that tree does not
-   build, or its contract change is not labelled honestly, no tag is ever created.** When both pass,
-   release-please creates the tag and the GitHub Release.
+   to be tagged. The `release` job needs both `compile` and `gates`, so **if that tree does not
+   build, or violates an invariant, or its contract change is not labelled honestly, no tag is ever
+   created.** When both pass, release-please creates the tag and the GitHub Release — but only if
+   this run's commit is still `main`'s head, since release-please acts on the branch as it is now,
+   not on the SHA the run verified.
 
 ## Merge strategy: never squash
 
@@ -70,8 +73,10 @@ footer on a commit that lands in the release.
 ### Why the contract gate runs twice
 
 On a pull request it compares the **merge base** with the PR head — early, where the author can
-still fix the label. On `main` it compares the **last released tag** with `HEAD`, reading the
-commits release-please will actually parse. Neither subsumes the other: the PR pass never sees a
+still fix the label. On `main` it compares the **last published tag** with `HEAD`, reading the
+commits release-please will actually parse. The published tag is resolved from the tags that exist,
+never from the manifest: on the release PR's own merge the manifest already names the version being
+released, whose tag does not exist yet, and trusting it would skip the gate on exactly that commit. Neither subsumes the other: the PR pass never sees a
 direct push to `main`, and it inspects commits that a squash merge could rewrite.
 
 ### Why compile and release live in one workflow
@@ -111,7 +116,9 @@ substitution contract from `modules/` and `hardware/` — required (`${ x if x i
 or a plain `${x}` with no default) versus optional (a key under `substitutions:`, with its
 default) — diffs it across the PR, and fails when the change is breaking but no commit says so.
 It also enforces parity between the required set and `tests/negative/omit_<name>.yaml`, so a new
-required substitution cannot arrive without the fixture that proves it.
+required substitution cannot arrive without the fixture that proves it, and it treats every module
+and board **path** as contract — a consumer imports `modules/controls.yaml` by URL, so deleting or
+renaming it is breaking even though that file declares no substitutions at all.
 
 Scopes mirror how a config is assembled. `modules/core.yaml` is the base, and every other module
 and board is a scope layered on it (`core ∪ <file>`). Modules are opt-in and composed selectively —
@@ -125,7 +132,7 @@ core, and is correctly not required.
 | workflow | trigger | does |
 |---|---|---|
 | `validate.yml` | pull request | all gates + `esphome config` over `tests/validate/` |
-| `release-gate.yml` | push to `main` | jobs `compile` (real `esphome compile`) and `contract` (contract gate vs the last tag), then job `release` (release-please) which **needs** both |
+| `release-gate.yml` | push to `main` | jobs `compile` (real `esphome compile`) and `gates` (every invariant script + contract gate vs the last published tag), then job `release` (release-please) which **needs** both |
 | `release.yml` | tag push / manual | belt-and-braces compile against an already-published tag |
 
 ## House style

@@ -76,16 +76,40 @@ jobs:
             esphome compile "$f"
           done
 
-  # The contract gate runs AGAIN here, against the last released tag. On a PR it inspects commits
-  # that a squash merge can rewrite, and a direct push to main never has a PR at all; this pass
-  # reads the commits release-please will actually parse.
-  contract:
+  # EVERY gate runs again here, not just the contract one. On a pull request they are enforced by
+  # validate.yml, but a direct push to main never has a pull request — and without this job a push
+  # that violates offline-survival, rollback timing, ref hygiene or automation syntax would still
+  # compile, still pass the contract check, and still be released.
+  gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Automation list-syntax gate
+        run: |
+          bash scripts/check-automation-syntax.sh --self-test
+          bash scripts/check-automation-syntax.sh
+
+      - name: SDK ref-consistency gate
+        run: |
+          bash scripts/check-sdk-ref.sh --self-test
+          bash scripts/check-sdk-ref.sh
+
+      - name: Offline-survival gate (reboot_timeout defaults must be 0s)
+        run: |
+          bash scripts/check-offline-survival.sh --self-test
+          bash scripts/check-offline-survival.sh
+
+      - name: OTA rollback-timing gate (safe_mode confirms after the watchdog)
+        run: |
+          bash scripts/check-rollback-timing.sh --self-test
+          bash scripts/check-rollback-timing.sh
+
+      # The contract gate here compares against the last PUBLISHED tag, reading the commits
+      # release-please will actually parse. The pull-request pass cannot stand in for it: it never
+      # sees a direct push, and it inspects commits a squash merge could have rewritten.
       - name: Substitution-contract gate since the last release
         run: |
           bash scripts/check-contract-diff.sh --self-test
@@ -95,16 +119,36 @@ jobs:
         run: bash scripts/check-contract-diff.sh --negative-parity
 
   release:
-    needs: [compile, contract]
+    needs: [compile, gates]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
+      # release-please acts on whatever main's HEAD is RIGHT NOW, not on the SHA this run verified.
+      # With no concurrency group, runs overlap: a slow run for an older commit could otherwise
+      # reach this step after main advanced and tag a newer commit whose own gates failed or are
+      # still running. If this run's SHA is no longer main's head, stand down — the run for the
+      # newer head is the one entitled to release it.
+      - name: Release only if this run's commit is still main's head
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${{ github.repository }}/commits/heads/main" --jq .sha)"
+          if [ "$current" != "${{ github.sha }}" ]; then
+            echo "main has advanced to ${current}; this run verified ${{ github.sha }} — standing down."
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          fi
+
       # Maintains the release PR — the version release-please computed from the Conventional Commit
       # history, plus the CHANGELOG it generated. When that PR merges, this same job (on the merge
       # commit, after its compile) creates the tag and the GitHub Release.
       - uses: googleapis/release-please-action@v4
+        if: steps.head.outputs.proceed == 'true'
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

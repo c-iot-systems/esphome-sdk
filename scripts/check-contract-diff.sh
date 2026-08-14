@@ -161,8 +161,14 @@ _collect() {
 }
 
 # Print the whole contract surface of a tree, sorted and stable:
+#   path <relative/path.yaml>
 #   required <scope> <name>
 #   optional <scope> <name> = <default>
+#
+# PATHS ARE CONTRACT. A consumer imports a module by URL — `github://c-iot-systems/esphome-sdk/
+# modules/controls.yaml@<ref>` — so deleting or renaming a module or board file breaks every config
+# importing it, immediately and regardless of substitutions. A module that declares none (as
+# controls.yaml does) would otherwise be invisible to this gate entirely.
 #
 # A name is CONTRACT if it is referenced or defaulted; it is OPTIONAL if a default is reachable in
 # its scope and REQUIRED otherwise.
@@ -223,6 +229,14 @@ extract_surface() {
       fi
     done <"$tmp/snames" | sort -u
   }
+
+  # Every shipped YAML path is a surface entry in its own right.
+  for d in "$root/modules" "$root/hardware"; do
+    [ -d "$d" ] || continue
+    while IFS= read -r -d '' f; do
+      printf 'path %s\n' "${f#"$root"/}"
+    done < <(find "$d" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
+  done | sort -u
 
   : >"$tmp/claimed"
   if [ -f "$core" ]; then
@@ -293,6 +307,21 @@ compare_surfaces() {
   cut -f1 "$tmp/bopt" | sort -u >"$tmp/boptn"; cut -f1 "$tmp/hopt" | sort -u >"$tmp/hoptn"
 
   _describe() { scope="${1%% *}"; name="${1#* }"; printf "'%s' (%s)" "$name" "$scope"; }
+
+  # a removed or renamed module/board path breaks every config importing it.
+  sed -nE 's/^path (.*)$/\1/p' "$base_s" | sort -u >"$tmp/bpath"
+  sed -nE 's/^path (.*)$/\1/p' "$head_s" | sort -u >"$tmp/hpath"
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    grep -qxF "$key" "$tmp/hpath" && continue
+    echo "check-contract-diff: BREAKING — module path '${key}' was removed or renamed — every config importing it fails"
+    breaking=1
+  done <"$tmp/bpath"
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    grep -qxF "$key" "$tmp/bpath" && continue
+    echo "check-contract-diff: ok — new module path '${key}'"
+  done <"$tmp/hpath"
 
   # required removed — gone entirely, or relaxed into an optional (relaxation is fine).
   while IFS= read -r key; do
@@ -439,26 +468,25 @@ check_negative_parity() {
 
 # ── release-time gate ─────────────────────────────────────────────────────────────────────────
 
-# Run the gate from the LAST RELEASED tag to HEAD. The released version is read from
-# .release-please-manifest.json, which is release-please's own record of what it last published —
-# more reliable than `git describe`, which would pick up any stray tag.
+# Run the gate from the LAST PUBLISHED tag to HEAD.
+#
+# The tag is resolved from the tags that ACTUALLY EXIST, deliberately not from
+# .release-please-manifest.json. On the push that matters most — the release PR's own merge — the
+# manifest at HEAD already carries the version being released, whose tag does not exist yet. Reading
+# it there would resolve to an absent tag, take the "nothing to compare" path, and skip the gate on
+# precisely the commit about to be tagged.
 run_since_release() {
-  local head="${1:-HEAD}" version tag
-  version="$(sed -nE 's/.*"\."[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-               "$(cd "$SCRIPT_DIR/.." && pwd)/.release-please-manifest.json" 2>/dev/null | head -n1)"
+  local head="${1:-HEAD}" tag
 
-  if [ -z "$version" ]; then
-    echo "check-contract-diff: FAIL — could not read the released version from .release-please-manifest.json"
-    return 1
-  fi
-  tag="v${version}"
+  # Newest existing vMAJOR.MINOR.PATCH tag by version order.
+  tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname 2>/dev/null | head -n1)"
 
-  if ! git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null 2>&1; then
-    echo "check-contract-diff: no released tag '${tag}' yet — nothing to compare against, vacuously ok"
+  if [ -z "$tag" ]; then
+    echo "check-contract-diff: no published tag yet — nothing to compare against, vacuously ok"
     return 0
   fi
 
-  echo "check-contract-diff: gating the next release against the last one (${tag})"
+  echo "check-contract-diff: gating the next release against the last published one (${tag})"
   run_gate "$tag" "$head"
 }
 
@@ -537,7 +565,7 @@ substitutions:
 ota:
   url: "${ ota_http_server_test if ota_http_server_test is defined else 1/0 }"
 YAML
-  if [ "$(extract_surface "$tmp/both")" = "optional core ota_http_server_test = fallback" ]; then
+  if extract_surface "$tmp/both" | grep -qx 'optional core ota_http_server_test = fallback'; then
     echo "self-test: PASS — guarded AND defaulted resolves to optional (ota_http_server_test case)"
   else
     echo "self-test: FAILED — guarded+defaulted misclassified"; extract_surface "$tmp/both"; rc=1
@@ -548,7 +576,7 @@ YAML
   mkdir -p "$tmp/fw/modules" "$tmp/fw/hardware"
   printf 'substitutions:\n  framework_variant: esp-idf\n' >"$tmp/fw/modules/core.yaml"
   printf 'esphome:\n  framework: ${framework_variant}\n'  >"$tmp/fw/hardware/board.yaml"
-  if [ "$(extract_surface "$tmp/fw")" = "optional core framework_variant = esp-idf" ]; then
+  if extract_surface "$tmp/fw" | grep -qx 'optional core framework_variant = esp-idf'; then
     echo "self-test: PASS — a board reference defaulted in modules/ is not required (framework_variant case)"
   else
     echo "self-test: FAILED — cross-scope default resolution"; extract_surface "$tmp/fw"; rc=1
@@ -643,6 +671,19 @@ YAML
   else
     echo "self-test: PASS — flow-style substitutions fail closed rather than being skipped"
   fi
+
+  # A module that declares no substitutions is still contract: its PATH is what consumers import.
+  mkdir -p "$tmp/paths/modules"
+  printf 'binary_sensor:\n  - platform: gpio\n' >"$tmp/paths/modules/controls.yaml"
+  if extract_surface "$tmp/paths" | grep -qx 'path modules/controls.yaml'; then
+    echo "self-test: PASS — a substitution-free module still appears on the surface as a path"
+  else
+    echo "self-test: FAILED — module path missing from the surface"; extract_surface "$tmp/paths"; rc=1
+  fi
+  printf 'path modules/controls.yaml\npath modules/core.yaml\n' >"$tmp/p_before"
+  printf 'path modules/core.yaml\n'                              >"$tmp/p_after"
+  _expect_cmp breaking "$tmp/p_before" "$tmp/p_after" "removing a module path is breaking" || rc=1
+  _expect_cmp ok "$tmp/p_after" "$tmp/p_before" "adding a module path is non-breaking" || rc=1
 
   # --- negative-harness parity ----------------------------------------------------------------
   mkdir -p "$tmp/par/modules" "$tmp/par/tests/negative"
