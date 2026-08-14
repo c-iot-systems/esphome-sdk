@@ -19,6 +19,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # The contract gate diffs the base commit's tree against the head's and reads the commit
+          # subjects in between, so it needs real history, not a depth-1 clone.
+          fetch-depth: 0
 
       - name: Automation list-syntax gate
         run: |
@@ -40,35 +43,20 @@ jobs:
           bash scripts/check-rollback-timing.sh --self-test
           bash scripts/check-rollback-timing.sh
 
+      - name: Substitution-contract gate (a breaking change must be declared breaking)
+        run: |
+          bash scripts/check-contract-diff.sh --self-test
+          bash scripts/check-contract-diff.sh \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}"
+
+      - name: Negative-harness parity (every required substitution has an omit_ fixture)
+        run: bash scripts/check-contract-diff.sh --negative-parity
+
       - name: Materialize the revision under test into validate fixtures
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(tests/validate/*.yaml tests/validate/*.yml)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No validate fixtures yet — nothing to materialize."
-            exit 0
-          fi
-          echo "Materializing SDK_REF=${SDK_REF} into ${#files[@]} fixture(s)"
-          for f in "${files[@]}"; do
-            sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
-          done
-          # Scan fixtures only; README intentionally documents the placeholder.
-          if grep -l '__SDK_REF__' "${files[@]}" ; then
-            echo "::error::A fixture still contains __SDK_REF__ after materialization"
-            exit 1
-          fi
-          bad=0
-          for f in "${files[@]}"; do
-            while IFS= read -r val; do
-              if [ "$val" != "${SDK_REF}" ]; then
-                echo "::error::${f}: resolved ref '${val}' != head SHA '${SDK_REF}'"
-                bad=1
-              fi
-            done < <(grep -oE '(^[[:space:]]*ref:|sdk_ref:)[[:space:]]*[^},[:space:]]+' "$f" \
-                       | sed -E 's/.*:[[:space:]]*//')
-          done
-          [ "$bad" -eq 0 ]
+          bash scripts/materialize-sdk-ref.sh --self-test
+          bash scripts/materialize-sdk-ref.sh "${{ github.event.pull_request.head.sha }}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
