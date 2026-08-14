@@ -83,6 +83,7 @@ void Phone::dump_config() {
   ESP_LOGCONFIG(TAG, "  Hook sensor: %s",
                 this->hook_sensor_ != nullptr ? "configured" : "none");
   ESP_LOGCONFIG(TAG, "  Sequence timeout: %u ms", this->sequence_timeout_);
+  ESP_LOGCONFIG(TAG, "  Max length: %u", this->max_length_);
   if (!this->enter_keys_.empty())
     ESP_LOGCONFIG(TAG, "  Enter keys: %s", this->enter_keys_.c_str());
   if (!this->clear_keys_.empty())
@@ -154,6 +155,16 @@ void Phone::process_key_(uint8_t key) {
     if (!this->input_.empty()) {
       this->validate_input_();  // clears before dispatching
     }
+    return;
+  }
+
+  // Ignore the key rather than truncating: a digit that silently vanished would
+  // still leave the player believing they typed it. Dropping it keeps an
+  // already-complete code intact, so overshooting by one no longer turns a valid
+  // sequence into a failed one.
+  if (this->max_length_ != 0 && this->input_.length() >= this->max_length_) {
+    ESP_LOGD(TAG, "Key ignored (max length %u reached)",
+             static_cast<unsigned>(this->max_length_));
     return;
   }
 

@@ -80,6 +80,8 @@ phone:
     # No timeout: the enter button above owns submission, so a slowly-typed
     # code must not be validated out from under the player mid-entry.
     sequence_timeout: 0s
+    # Bounded input: further keys are ignored rather than growing the string.
+    max_length: 8
     passwords:
       # Runtime-editable: resolved from the text entity on every submission.
       - password: !lambda "return id(text_password).state;"

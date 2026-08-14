@@ -26,6 +26,7 @@ CONF_SEQUENCE_TIMEOUT = "sequence_timeout"
 CONF_ON_HOOK_PRESS = "on_hook_press"
 CONF_ON_HOOK_RELEASE = "on_hook_release"
 CONF_ON_KEY_PRESS = "on_key_press"
+CONF_MAX_LENGTH = "max_length"
 CONF_ENTER_KEYS = "enter_keys"
 CONF_CLEAR_KEYS = "clear_keys"
 CONF_PASSWORDS = "passwords"
@@ -137,6 +138,7 @@ CONFIG_SCHEMA = cv.All(
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(KeyPressTrigger),
                 },
             ),
+            cv.Optional(CONF_MAX_LENGTH, default=0): cv.uint32_t,
             cv.Optional(CONF_ENTER_KEYS): cv.string,
             cv.Optional(CONF_CLEAR_KEYS): cv.string,
             cv.Optional(CONF_PASSWORDS): cv.ensure_list(PASSWORD_SCHEMA),
@@ -195,6 +197,7 @@ async def _generate_optional_settings(
         cg.add(var.set_hook_sensor(hook_sensor))
 
     cg.add(var.set_sequence_timeout(config[CONF_SEQUENCE_TIMEOUT]))
+    cg.add(var.set_max_length(config[CONF_MAX_LENGTH]))
 
     if CONF_ENTER_KEYS in config:
         cg.add(var.set_enter_keys(config[CONF_ENTER_KEYS]))

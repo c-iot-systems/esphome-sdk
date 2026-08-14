@@ -544,6 +544,13 @@ CI compiles the C++ at least once per release.
   wants that off, or a player typing a long code slowly has it submitted out from under them
   mid-entry. `0s` means the input stands until it is submitted or cleared explicitly.
 
+  **`max_length` bounds the input.** The default `0` is unlimited, which is fine for a keypad
+  whose codes end at an enter key pressed promptly, and wrong for one left in a public room:
+  without a cap the accumulated string grows for as long as someone keeps pressing and is
+  republished on every press. Set it to the longest password and further keys are ignored
+  rather than truncated, so overshooting by one does not turn an already-complete code into a
+  failed one.
+
   **Prefer `on_no_match` to a per-password `on_password_wrong`.** The per-entry trigger fires once
   for **every** entry the input did not match, so with N passwords configured a single wrong code
   fires it N times — right when the passwords are independent locks, wrong when they are

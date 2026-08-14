@@ -46,6 +46,7 @@ class Phone : public Component {
     hook_sensor_ = sensor;
   }
   void set_sequence_timeout(uint32_t timeout) { sequence_timeout_ = timeout; }
+  void set_max_length(uint32_t max_length) { max_length_ = max_length; }
   void set_enter_keys(std::string keys) { enter_keys_ = std::move(keys); }
   void set_clear_keys(std::string keys) { clear_keys_ = std::move(keys); }
 
@@ -119,6 +120,10 @@ class Phone : public Component {
   std::string input_;
   uint32_t last_key_time_{0};
   uint32_t sequence_timeout_{3000};
+  // 0 = unlimited. A keypad prop wants a real cap: without one a player
+  // leaning on the pad grows input_ without bound and republishes it on
+  // every press.
+  uint32_t max_length_{0};
   std::string enter_keys_;
   std::string clear_keys_;
 
