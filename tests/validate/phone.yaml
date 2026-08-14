@@ -97,6 +97,11 @@ phone:
           - logger.log:
               format: "no password matched (%d chars)"
               args: ["x.length()"]
+          # Deliberately inside a trigger that PASSES A VALUE (Trigger<std::string>).
+          # An action whose play() takes the pack by value fails to override
+          # Action::play(const Ts&...) here and the class stays abstract, which an
+          # argument-less trigger like the button above cannot catch.
+          - phone.clear: prop_phone
 
 packages:
   criotive:

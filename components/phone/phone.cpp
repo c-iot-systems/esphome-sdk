@@ -152,8 +152,7 @@ void Phone::process_key_(uint8_t key) {
       this->enter_keys_.find(ch) != std::string::npos) {
     ESP_LOGD(TAG, "Enter key pressed");
     if (!this->input_.empty()) {
-      this->validate_input_();
-      this->clear_input_();
+      this->validate_input_();  // clears before dispatching
     }
     return;
   }
@@ -178,26 +177,43 @@ void Phone::check_timeout_() {
   // sensitive. Log only its length as a non-secret diagnostic (no-secrets-in-logs).
   ESP_LOGD(TAG, "Sequence timeout after %u character(s)",
            static_cast<unsigned>(this->input_.length()));
-  this->validate_input_();
-  this->clear_input_();
+  this->validate_input_();  // clears before dispatching
 }
 
 void Phone::validate_input_() {
+  // A callback may reach straight back into this component: phone.clear and
+  // phone.submit are public actions, and a password's on_right routinely starts
+  // a room-reset sequence that clears the keypad. So settle all state FIRST and
+  // match against an immutable snapshot.
+  //
+  // Reading this->input_ across the loop instead would let a callback that
+  // clears it make every later password compare against "" -- rejecting a valid
+  // alternative and handing on_no_match the wrong value -- and re-entering
+  // submit() from a callback would recurse until the stack gave out.
+  if (this->validating_) {
+    ESP_LOGW(TAG, "Ignoring submission re-entered from a callback");
+    return;
+  }
+  const std::string submitted = this->input_;
+  this->validating_ = true;
+  this->clear_input_();
+
   bool matched = false;
   for (auto& entry : this->passwords_) {
-    if (this->input_ == entry.password.value()) {
+    if (submitted == entry.password.value()) {
       ESP_LOGD(TAG, "Password correct");
       matched = true;
-      entry.on_right.call(this->input_);
+      entry.on_right.call(submitted);
     } else {
       ESP_LOGD(TAG, "Password wrong");
-      entry.on_wrong.call(this->input_);
+      entry.on_wrong.call(submitted);
     }
   }
   if (!matched) {
     ESP_LOGD(TAG, "No password matched");
-    this->on_no_match_.call(this->input_);
+    this->on_no_match_.call(submitted);
   }
+  this->validating_ = false;
 }
 
 void Phone::clear_input_() {

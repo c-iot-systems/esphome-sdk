@@ -65,8 +65,7 @@ class Phone : public Component {
     if (this->input_.empty()) {
       return;
     }
-    this->validate_input_();
-    this->clear_input_();
+    this->validate_input_();  // clears before dispatching
   }
   void clear() { this->clear_input_(); }
 #ifdef USE_TEXT_SENSOR
@@ -124,6 +123,8 @@ class Phone : public Component {
   std::string clear_keys_;
 
   std::vector<PasswordEntry> passwords_;
+  // Guards validate_input_ against a callback re-entering it.
+  bool validating_{false};
 
   CallbackManager<void()> on_hook_press_;
   CallbackManager<void()> on_hook_release_;
@@ -182,16 +183,21 @@ class NoMatchTrigger : public Trigger<std::string> {
   }
 };
 
+// `const Ts&...`, not `Ts...`: Action declares `virtual void play(const Ts&...)`,
+// so a by-value parameter pack silently fails to override once Ts is non-empty
+// and the action becomes abstract. That compiles fine under an argument-less
+// trigger and breaks only when someone puts the action inside one that passes a
+// value -- on_no_match, on_key_press, or a parameterised script.
 template <typename... Ts>
 class SubmitAction : public Action<Ts...>, public Parented<Phone> {
  public:
-  void play(Ts... x) override { this->parent_->submit(); }
+  void play(const Ts&... x) override { this->parent_->submit(); }
 };
 
 template <typename... Ts>
 class ClearAction : public Action<Ts...>, public Parented<Phone> {
  public:
-  void play(Ts... x) override { this->parent_->clear(); }
+  void play(const Ts&... x) override { this->parent_->clear(); }
 };
 
 }  // namespace phone
