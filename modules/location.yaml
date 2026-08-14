@@ -3,7 +3,7 @@ external_components:
       type: git
       url: https://github.com/c-iot-systems/esphome-sdk
       ref: ${sdk_ref}
-    components: [google_location]
+    components: [google_location, ack_button]
 
 text_sensor:
   - platform: google_location
@@ -12,7 +12,10 @@ text_sensor:
     update_interval: never
 
 button:
-  - platform: template
+  # ack_button, not template: a location request is asked for remotely, so the
+  # caller needs to know the device heard it. The scan itself answers later and
+  # out of band, on the text sensor above.
+  - platform: ack_button
     name: "Location Request"
     id: button_google_location
     on_press:

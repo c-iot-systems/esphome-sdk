@@ -28,6 +28,11 @@ jobs:
           bash scripts/check-automation-syntax.sh --self-test
           bash scripts/check-automation-syntax.sh
 
+      - name: Button-platform gate (a visible button must be able to acknowledge)
+        run: |
+          bash scripts/check-button-platform.sh --self-test
+          bash scripts/check-button-platform.sh
+
       - name: SDK ref-consistency gate
         run: |
           bash scripts/check-sdk-ref.sh --self-test

@@ -115,6 +115,7 @@ CI runs `--self-test` before the real check, so a gate that has been silently de
 |---|---|
 | `check-automation-syntax.sh` | `on_*` automations use list syntax, so package merging cannot collapse them |
 | `check-sdk-ref.sh` | `vars.sdk_ref` equals the package `ref`; no module hard-codes a ref |
+| `check-button-platform.sh` | a button the platform can see (not `internal: true`) is an `ack_button`, so it can acknowledge |
 | `check-offline-survival.sh` | `reboot_timeout` defaults are `0s` — a device never reboots through an outage |
 | `check-rollback-timing.sh` | `safe_mode` confirms after the OTA rollback watchdog |
 | `check-negative.sh` | every required substitution actually fails validation when omitted |

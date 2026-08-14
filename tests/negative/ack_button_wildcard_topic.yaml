@@ -1,0 +1,54 @@
+# Negative: an ack_button whose command topic is a FILTER matching its state topic
+# must not validate. `command_topic` is a subscription, so cv.subscribe_topic accepts
+# `+` and `#`; the topics below are not equal as strings, but the broker still routes
+# every acknowledgement back into the button's own subscription. Literal equality is
+# therefore not a sufficient guard, and this fixture is what says so.
+# Its sibling ack_button_shared_topic.yaml covers the identical-string form.
+#
+# Not a substitution fixture — the rest of this directory pins required substitutions,
+# this one pins a platform invariant. It is here rather than in tests/validate/ because
+# the assertion is "this fails", and check-negative.sh is what asserts that.
+#
+# MQTT 3.1.1 has no no-local option, so an ack the broker matches against this button's
+# own subscription comes straight back as another press, which acks, forever. Weakening
+# the guard in components/ack_button/button/__init__.py to plain string equality makes
+# this config validate, and this gate goes red.
+#
+# The component is sourced locally, not through modules/ack_button.yaml: that module
+# fetches over git, which would fail here for the wrong reason and hide a removed guard.
+substitutions:
+  device_name: neg-device
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  mqtt_broker: mqtt.test.invalid
+  mqtt_port: "8883"
+  mqtt_ca_certificate: test-ca
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+    components: [ack_button]
+
+button:
+  - platform: ack_button
+    name: "Wildcard Looping Button"
+    state_topic: neg-device/acks/pressed
+    command_topic: neg-device/acks/+
+
+packages:
+  core: !include { file: ../../modules/core.yaml, vars: {sdk_ref: local-test} }
+  wifi: !include { file: ../../modules/wifi.yaml, vars: {sdk_ref: local-test} }
+  mqtt: !include { file: ../../modules/criotive_mqtt.yaml, vars: {sdk_ref: local-test} }
+  ota: !include { file: ../../modules/ota.yaml, vars: {sdk_ref: local-test} }
