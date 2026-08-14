@@ -1,5 +1,22 @@
+substitutions:
+  # A real interval, not `0s` and not `never`.
+  #
+  # `0s` does not mean "never": ESPHome coerces a 0ms interval to 1ms (warning
+  # that a literal 0ms would spin the main loop into a watchdog reset), so it
+  # polled every device at 1 kHz.
+  #
+  # `never` would be wrong too. A consuming firmware may attach its own numeric
+  # debug sensors (free heap, loop time, cpu frequency) to this same component,
+  # and DebugComponent::update() is the ONLY place those publish -- `never`
+  # would silence them. The two text sensors below are unaffected either way;
+  # they publish from dump_config() at boot.
+  #
+  # A device that wants a different cadence overrides this; `never` remains
+  # available to a device that knowingly declares no debug sensors.
+  diagnostics_update_interval: 60s
+
 debug:
-  update_interval: 0s
+  update_interval: ${diagnostics_update_interval}
 
 text_sensor:
   - platform: debug
