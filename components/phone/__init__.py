@@ -26,6 +26,7 @@ CONF_SEQUENCE_TIMEOUT = "sequence_timeout"
 CONF_ON_HOOK_PRESS = "on_hook_press"
 CONF_ON_HOOK_RELEASE = "on_hook_release"
 CONF_ON_KEY_PRESS = "on_key_press"
+CONF_MAX_LENGTH = "max_length"
 CONF_ENTER_KEYS = "enter_keys"
 CONF_CLEAR_KEYS = "clear_keys"
 CONF_PASSWORDS = "passwords"
@@ -33,6 +34,7 @@ CONF_PASSWORD = "password"  # noqa: S105  # nosec B105
 CONF_TEXT_SENSOR = "text_sensor"
 CONF_ON_PASSWORD_RIGHT = "on_password_right"  # noqa: S105  # nosec B105
 CONF_ON_PASSWORD_WRONG = "on_password_wrong"  # noqa: S105  # nosec B105
+CONF_ON_NO_MATCH = "on_no_match"
 
 phone_ns = cg.esphome_ns.namespace("phone")
 Phone = phone_ns.class_("Phone", cg.Component)
@@ -57,6 +59,13 @@ PasswordWrongTrigger = phone_ns.class_(
     "PasswordWrongTrigger",
     automation.Trigger.template(cg.std_string),
 )
+NoMatchTrigger = phone_ns.class_(
+    "NoMatchTrigger",
+    automation.Trigger.template(cg.std_string),
+)
+
+SubmitAction = phone_ns.class_("SubmitAction", automation.Action)
+ClearAction = phone_ns.class_("ClearAction", automation.Action)
 
 
 def check_keys(obj: dict[str, Any]) -> dict[str, Any]:
@@ -74,7 +83,10 @@ def check_keys(obj: dict[str, Any]) -> dict[str, Any]:
 
 PASSWORD_SCHEMA = cv.Schema(
     {
-        cv.Required(CONF_PASSWORD): cv.string,
+        # Templatable so a password can live in an entity the operator edits at
+        # runtime — `password: !lambda "return id(my_text).state;"` — instead of
+        # being frozen into the binary. A plain string still validates.
+        cv.Required(CONF_PASSWORD): cv.templatable(cv.string),
         cv.Optional(CONF_TEXT_SENSOR): cv.use_id(text_sensor.TextSensor),
         cv.Optional(CONF_ON_PASSWORD_RIGHT): automation.validate_automation(
             {
@@ -126,9 +138,15 @@ CONFIG_SCHEMA = cv.All(
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(KeyPressTrigger),
                 },
             ),
+            cv.Optional(CONF_MAX_LENGTH, default=0): cv.uint32_t,
             cv.Optional(CONF_ENTER_KEYS): cv.string,
             cv.Optional(CONF_CLEAR_KEYS): cv.string,
             cv.Optional(CONF_PASSWORDS): cv.ensure_list(PASSWORD_SCHEMA),
+            cv.Optional(CONF_ON_NO_MATCH): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(NoMatchTrigger),
+                },
+            ),
         },
     ),
     check_keys,
@@ -141,7 +159,12 @@ async def _generate_password_code(
     pwd_conf: dict[str, Any],
 ) -> None:
     """Generate code for a single password entry."""
-    cg.add(var.add_password(pwd_conf[CONF_PASSWORD]))
+    password = await cg.templatable(
+        pwd_conf[CONF_PASSWORD],
+        [],
+        cg.std_string,
+    )
+    cg.add(var.add_password(password))
 
     if CONF_TEXT_SENSOR in pwd_conf:
         ts = await cg.get_variable(pwd_conf[CONF_TEXT_SENSOR])
@@ -174,6 +197,7 @@ async def _generate_optional_settings(
         cg.add(var.set_hook_sensor(hook_sensor))
 
     cg.add(var.set_sequence_timeout(config[CONF_SEQUENCE_TIMEOUT]))
+    cg.add(var.set_max_length(config[CONF_MAX_LENGTH]))
 
     if CONF_ENTER_KEYS in config:
         cg.add(var.set_enter_keys(config[CONF_ENTER_KEYS]))
@@ -221,5 +245,38 @@ async def to_code(config: dict[str, Any]) -> None:
             conf,
         )
 
+    for conf in config.get(CONF_ON_NO_MATCH, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(
+            trigger,
+            [(cg.std_string, "x")],
+            conf,
+        )
+
     for i, pwd_conf in enumerate(config.get(CONF_PASSWORDS, [])):
         await _generate_password_code(var, i, pwd_conf)
+
+
+def _register_simple_action(action_name: str, action_class: Any) -> None:  # noqa: ANN401
+    """Register an argument-less phone action."""
+
+    @automation.register_action(  # type: ignore[untyped-decorator]
+        action_name,
+        action_class,
+        automation.maybe_simple_id({cv.GenerateID(): cv.use_id(Phone)}),
+        synchronous=True,
+    )
+    async def simple_action_to_code(
+        config: dict[str, Any],
+        action_id: Any,  # noqa: ANN401
+        template_arg: Any,  # noqa: ANN401
+        args: Any,  # noqa: ANN401, ARG001
+    ) -> Any:  # noqa: ANN401
+        """Generate code for a simple phone action."""
+        var = cg.new_Pvariable(action_id, template_arg)
+        await cg.register_parented(var, config[CONF_ID])
+        return var
+
+
+for _name, _class in (("phone.submit", SubmitAction), ("phone.clear", ClearAction)):
+    _register_simple_action(_name, _class)

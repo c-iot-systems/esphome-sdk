@@ -1,5 +1,7 @@
 #include "phone.h"
 
+#include <vector>
+
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
@@ -83,6 +85,7 @@ void Phone::dump_config() {
   ESP_LOGCONFIG(TAG, "  Hook sensor: %s",
                 this->hook_sensor_ != nullptr ? "configured" : "none");
   ESP_LOGCONFIG(TAG, "  Sequence timeout: %u ms", this->sequence_timeout_);
+  ESP_LOGCONFIG(TAG, "  Max length: %u", this->max_length_);
   if (!this->enter_keys_.empty())
     ESP_LOGCONFIG(TAG, "  Enter keys: %s", this->enter_keys_.c_str());
   if (!this->clear_keys_.empty())
@@ -152,9 +155,18 @@ void Phone::process_key_(uint8_t key) {
       this->enter_keys_.find(ch) != std::string::npos) {
     ESP_LOGD(TAG, "Enter key pressed");
     if (!this->input_.empty()) {
-      this->validate_input_();
-      this->clear_input_();
+      this->validate_input_();  // clears once dispatch is done
     }
+    return;
+  }
+
+  // Ignore the key rather than truncating: a digit that silently vanished would
+  // still leave the player believing they typed it. Dropping it keeps an
+  // already-complete code intact, so overshooting by one no longer turns a valid
+  // sequence into a failed one.
+  if (this->max_length_ != 0 && this->input_.length() >= this->max_length_) {
+    ESP_LOGD(TAG, "Key ignored (max length %u reached)",
+             static_cast<unsigned>(this->max_length_));
     return;
   }
 
@@ -165,26 +177,72 @@ void Phone::process_key_(uint8_t key) {
 
 void Phone::check_timeout_() {
   if (this->input_.empty()) return;
+  // 0 disables the timeout: the input then stands until it is submitted or
+  // cleared explicitly. Without this a 0 would mean "every keypress is already
+  // overdue" and validate on the very first digit, which is never what a caller
+  // asking for no timeout wants. A prop whose enter button drives phone.submit
+  // needs this — a player typing an 8-digit code slowly must not have it
+  // submitted out from under them mid-entry.
+  if (this->sequence_timeout_ == 0) return;
   if (millis() - this->last_key_time_ < this->sequence_timeout_) return;
 
   // Do not log the accumulated input: it is matched against configured passwords, so it is
   // sensitive. Log only its length as a non-secret diagnostic (no-secrets-in-logs).
   ESP_LOGD(TAG, "Sequence timeout after %u character(s)",
            static_cast<unsigned>(this->input_.length()));
-  this->validate_input_();
-  this->clear_input_();
+  this->validate_input_();  // clears once dispatch is done
 }
 
 void Phone::validate_input_() {
+  // A callback may reach straight back into this component: phone.clear and
+  // phone.submit are public actions, and a password's on_right routinely starts
+  // a room-reset sequence that clears the keypad. So match against an immutable
+  // snapshot rather than reading this->input_ as the loop runs -- otherwise a
+  // callback that clears it makes every later password compare against "",
+  // rejecting a valid alternative and handing on_no_match the wrong value.
+  if (this->validating_) {
+    ESP_LOGW(TAG, "Ignoring submission re-entered from a callback");
+    return;
+  }
+  const std::string submitted = this->input_;
+  this->validating_ = true;
+
+  // Resolve EVERY password before dispatching anything. A password may be a
+  // lambda reading an entity, and the first callback to run is routinely a room
+  // reset that rewrites those entities — evaluating inside the dispatch loop
+  // would check one submission against a mix of old- and new-session codes.
+  std::vector<bool> hits;
+  hits.reserve(this->passwords_.size());
+  bool matched = false;
   for (auto& entry : this->passwords_) {
-    if (this->input_ == entry.password) {
+    const bool hit = (submitted == entry.password.value());
+    hits.push_back(hit);
+    matched = matched || hit;
+  }
+
+  // Dispatch with the input still standing: callbacks predate submit()/clear()
+  // and could always read the configured text sensor to see what was typed.
+  for (size_t i = 0; i < this->passwords_.size(); i++) {
+    if (hits[i]) {
       ESP_LOGD(TAG, "Password correct");
-      entry.on_right.call(this->input_);
+      this->passwords_[i].on_right.call(submitted);
     } else {
       ESP_LOGD(TAG, "Password wrong");
-      entry.on_wrong.call(this->input_);
+      this->passwords_[i].on_wrong.call(submitted);
     }
   }
+  if (!matched) {
+    ESP_LOGD(TAG, "No password matched");
+    this->on_no_match_.call(submitted);
+  }
+
+  // Clear only what was actually validated. A callback may have cleared the
+  // keypad itself (a reset sequence does), and clearing unconditionally would
+  // discard anything it put there instead.
+  if (this->input_ == submitted) {
+    this->clear_input_();
+  }
+  this->validating_ = false;
 }
 
 void Phone::clear_input_() {

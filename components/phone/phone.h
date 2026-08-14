@@ -17,7 +17,11 @@ namespace esphome {
 namespace phone {
 
 struct PasswordEntry {
-  std::string password;
+  // Templatable rather than a plain string so a password can be read at match
+  // time from another entity — typically a `text:` the operator edits from the
+  // platform. A literal in YAML still compiles to a constant, so the cost is
+  // only paid by configs that ask for it.
+  TemplatableValue<std::string> password;
 #ifdef USE_TEXT_SENSOR
   text_sensor::TextSensor* text_sensor{nullptr};
 #endif
@@ -42,14 +46,37 @@ class Phone : public Component {
     hook_sensor_ = sensor;
   }
   void set_sequence_timeout(uint32_t timeout) { sequence_timeout_ = timeout; }
+  void set_max_length(uint32_t max_length) { max_length_ = max_length; }
   void set_enter_keys(std::string keys) { enter_keys_ = std::move(keys); }
   void set_clear_keys(std::string keys) { clear_keys_ = std::move(keys); }
 
-  void add_password(const std::string& password) {
+  void add_password(TemplatableValue<std::string> password) {
     // PasswordEntry holds CallbackManagers, which are move-only, so the entry
     // must be constructed in place instead of copied in.
     passwords_.emplace_back();
-    passwords_.back().password = password;
+    passwords_.back().password = std::move(password);
+  }
+
+  // Submit and clear the accumulated input from outside the keypad. `enter_keys`
+  // and `clear_keys` only cover keys on the phone's own matrix; a device whose
+  // enter button is a separate GPIO (or whose reset is driven by an automation)
+  // has no key to name, and validate_input_() / clear_input_() are protected.
+  // submit() matches the enter-key path exactly, including ignoring empty input.
+  void submit() {
+    if (this->input_.empty()) {
+      return;
+    }
+    this->validate_input_();  // clears once dispatch is done
+  }
+  // No-op when already empty. clear_input_() publishes to the configured text
+  // sensors, whose on_value automations run synchronously — one that itself
+  // calls phone.clear would otherwise republish the same empty state and
+  // recurse until the stack gave out.
+  void clear() {
+    if (this->input_.empty()) {
+      return;
+    }
+    this->clear_input_();
   }
 #ifdef USE_TEXT_SENSOR
   void set_password_text_sensor(int index, text_sensor::TextSensor* ts) {
@@ -73,6 +100,9 @@ class Phone : public Component {
   void add_on_password_wrong_callback(
       int index, std::function<void(std::string)>&& callback) {
     passwords_[index].on_wrong.add(std::move(callback));
+  }
+  void add_on_no_match_callback(std::function<void(std::string)>&& callback) {
+    on_no_match_.add(std::move(callback));
   }
 
  protected:
@@ -99,14 +129,21 @@ class Phone : public Component {
   std::string input_;
   uint32_t last_key_time_{0};
   uint32_t sequence_timeout_{3000};
+  // 0 = unlimited. A keypad prop wants a real cap: without one a player
+  // leaning on the pad grows input_ without bound and republishes it on
+  // every press.
+  uint32_t max_length_{0};
   std::string enter_keys_;
   std::string clear_keys_;
 
   std::vector<PasswordEntry> passwords_;
+  // Guards validate_input_ against a callback re-entering it.
+  bool validating_{false};
 
   CallbackManager<void()> on_hook_press_;
   CallbackManager<void()> on_hook_release_;
   CallbackManager<void(uint8_t)> on_key_press_;
+  CallbackManager<void(std::string)> on_no_match_;
 };
 
 class HookPressTrigger : public Trigger<> {
@@ -145,6 +182,36 @@ class PasswordWrongTrigger : public Trigger<std::string> {
     phone->add_on_password_wrong_callback(
         index, [this](std::string input) { this->trigger(std::move(input)); });
   }
+};
+
+// Fires once per submission that matched no password at all. The per-entry
+// PasswordWrongTrigger fires once for every entry the input did not match, so
+// with N passwords configured a single wrong code fires it N times — rarely
+// what a caller wants when the passwords are alternatives rather than
+// independent locks.
+class NoMatchTrigger : public Trigger<std::string> {
+ public:
+  explicit NoMatchTrigger(Phone* phone) {
+    phone->add_on_no_match_callback(
+        [this](std::string input) { this->trigger(std::move(input)); });
+  }
+};
+
+// `const Ts&...`, not `Ts...`: Action declares `virtual void play(const Ts&...)`,
+// so a by-value parameter pack silently fails to override once Ts is non-empty
+// and the action becomes abstract. That compiles fine under an argument-less
+// trigger and breaks only when someone puts the action inside one that passes a
+// value -- on_no_match, on_key_press, or a parameterised script.
+template <typename... Ts>
+class SubmitAction : public Action<Ts...>, public Parented<Phone> {
+ public:
+  void play(const Ts&... x) override { this->parent_->submit(); }
+};
+
+template <typename... Ts>
+class ClearAction : public Action<Ts...>, public Parented<Phone> {
+ public:
+  void play(const Ts&... x) override { this->parent_->clear(); }
 };
 
 }  // namespace phone

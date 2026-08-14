@@ -529,6 +529,34 @@ CI compiles the C++ at least once per release.
   they may be native GPIO **or** a `tca8418` expander pin), the `keys` layout (length must equal
   rows × columns), and any hook sensor / passwords / automations the device needs.
 
+  **A password may be templatable.** `password:` accepts a lambda as well as a literal, and it is
+  resolved on every submission — so `password: !lambda "return id(my_text).state;"` lets an operator
+  change the code from a `text:` entity without a reflash, while a literal still compiles to a
+  constant. A prop whose codes are configured from the platform wants the lambda form.
+
+  **`phone.submit` / `phone.clear` drive it from outside the matrix.** `enter_keys` and `clear_keys`
+  can only name keys on the phone's own matrix, so a prop whose enter button is a separate GPIO — or
+  whose reset is driven by an automation — has no key to name. The two actions submit and clear the
+  accumulated input directly; `phone.submit` ignores empty input, exactly as the enter key does.
+
+  **`sequence_timeout: 0s` disables the timeout.** The default is `3s`, after which a part-typed
+  sequence is validated and cleared on its own. A prop whose enter button drives `phone.submit`
+  wants that off, or a player typing a long code slowly has it submitted out from under them
+  mid-entry. `0s` means the input stands until it is submitted or cleared explicitly.
+
+  **`max_length` bounds the input.** The default `0` is unlimited, which is fine for a keypad
+  whose codes end at an enter key pressed promptly, and wrong for one left in a public room:
+  without a cap the accumulated string grows for as long as someone keeps pressing and is
+  republished on every press. Set it to the longest password and further keys are ignored
+  rather than truncated, so overshooting by one does not turn an already-complete code into a
+  failed one.
+
+  **Prefer `on_no_match` to a per-password `on_password_wrong`.** The per-entry trigger fires once
+  for **every** entry the input did not match, so with N passwords configured a single wrong code
+  fires it N times — right when the passwords are independent locks, wrong when they are
+  alternatives (one keypad, one code per colour). The component-level `on_no_match` fires exactly
+  once per submission that matched nothing, which is what a single wrong-code effect should hang on.
+
 ### Hardware modules
 
 A hardware module owns the platform component (`esp32:`) and the board's own I/O. Board and variant

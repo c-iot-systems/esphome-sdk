@@ -54,6 +54,16 @@ binary_sensor:
     name: "slot_4_io_expander_keyscan_10x8_sda"
     internal: true
 
+# The Power connector's CAN pair, exercised by name for the same reason as the slot
+# pins above: TX is GPIO2 on both revisions but RX is not, so a room reading these
+# from the board file rather than hard-coding them stays correct across revisions.
+canbus:
+  - platform: esp32_can
+    tx_pin: ${can_tx}
+    rx_pin: ${can_rx}
+    can_id: 1
+    bit_rate: 50kbps
+
 packages:
   criotive:
     url: https://github.com/c-iot-systems/esphome-sdk
