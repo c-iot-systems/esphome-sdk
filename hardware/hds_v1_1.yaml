@@ -1,5 +1,10 @@
 substitutions:
   can_resistor_status: ALWAYS_ON
+  # The CAN transceiver on the Power connector. TX is GPIO2 on both board
+  # revisions but RX is not, so a room that hard-codes these numbers is
+  # wrong on the other board — on v1.1 the pair is 2/3.
+  can_tx: "2"
+  can_rx: "3"
   # Disable SW1 before enabling UART0; both use GPIO1.
   hds_v1_1_sw1_enabled: true
   slot_1_triple_digital_input_in1: "23"

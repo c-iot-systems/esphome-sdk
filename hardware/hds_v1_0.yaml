@@ -1,6 +1,11 @@
 substitutions:
   # Only CAN endpoints should enable termination.
   can_resistor_status: ALWAYS_ON
+  # The CAN transceiver on the Power connector. TX is GPIO2 on both board
+  # revisions but RX is not, so a room that hard-codes these numbers is
+  # wrong on the other board — on v1.0 the pair is 2/15.
+  can_tx: "2"
+  can_rx: "15"
   slot_1_triple_digital_input_in1: "7"
   slot_1_triple_digital_input_in2: "8"
   slot_1_triple_digital_input_in3: "37"
