@@ -1,5 +1,7 @@
 #include "phone.h"
 
+#include <vector>
+
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
@@ -153,7 +155,7 @@ void Phone::process_key_(uint8_t key) {
       this->enter_keys_.find(ch) != std::string::npos) {
     ESP_LOGD(TAG, "Enter key pressed");
     if (!this->input_.empty()) {
-      this->validate_input_();  // clears before dispatching
+      this->validate_input_();  // clears once dispatch is done
     }
     return;
   }
@@ -188,41 +190,57 @@ void Phone::check_timeout_() {
   // sensitive. Log only its length as a non-secret diagnostic (no-secrets-in-logs).
   ESP_LOGD(TAG, "Sequence timeout after %u character(s)",
            static_cast<unsigned>(this->input_.length()));
-  this->validate_input_();  // clears before dispatching
+  this->validate_input_();  // clears once dispatch is done
 }
 
 void Phone::validate_input_() {
   // A callback may reach straight back into this component: phone.clear and
   // phone.submit are public actions, and a password's on_right routinely starts
-  // a room-reset sequence that clears the keypad. So settle all state FIRST and
-  // match against an immutable snapshot.
-  //
-  // Reading this->input_ across the loop instead would let a callback that
-  // clears it make every later password compare against "" -- rejecting a valid
-  // alternative and handing on_no_match the wrong value -- and re-entering
-  // submit() from a callback would recurse until the stack gave out.
+  // a room-reset sequence that clears the keypad. So match against an immutable
+  // snapshot rather than reading this->input_ as the loop runs -- otherwise a
+  // callback that clears it makes every later password compare against "",
+  // rejecting a valid alternative and handing on_no_match the wrong value.
   if (this->validating_) {
     ESP_LOGW(TAG, "Ignoring submission re-entered from a callback");
     return;
   }
   const std::string submitted = this->input_;
   this->validating_ = true;
-  this->clear_input_();
 
+  // Resolve EVERY password before dispatching anything. A password may be a
+  // lambda reading an entity, and the first callback to run is routinely a room
+  // reset that rewrites those entities — evaluating inside the dispatch loop
+  // would check one submission against a mix of old- and new-session codes.
+  std::vector<bool> hits;
+  hits.reserve(this->passwords_.size());
   bool matched = false;
   for (auto& entry : this->passwords_) {
-    if (submitted == entry.password.value()) {
+    const bool hit = (submitted == entry.password.value());
+    hits.push_back(hit);
+    matched = matched || hit;
+  }
+
+  // Dispatch with the input still standing: callbacks predate submit()/clear()
+  // and could always read the configured text sensor to see what was typed.
+  for (size_t i = 0; i < this->passwords_.size(); i++) {
+    if (hits[i]) {
       ESP_LOGD(TAG, "Password correct");
-      matched = true;
-      entry.on_right.call(submitted);
+      this->passwords_[i].on_right.call(submitted);
     } else {
       ESP_LOGD(TAG, "Password wrong");
-      entry.on_wrong.call(submitted);
+      this->passwords_[i].on_wrong.call(submitted);
     }
   }
   if (!matched) {
     ESP_LOGD(TAG, "No password matched");
     this->on_no_match_.call(submitted);
+  }
+
+  // Clear only what was actually validated. A callback may have cleared the
+  // keypad itself (a reset sequence does), and clearing unconditionally would
+  // discard anything it put there instead.
+  if (this->input_ == submitted) {
+    this->clear_input_();
   }
   this->validating_ = false;
 }

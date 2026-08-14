@@ -66,9 +66,18 @@ class Phone : public Component {
     if (this->input_.empty()) {
       return;
     }
-    this->validate_input_();  // clears before dispatching
+    this->validate_input_();  // clears once dispatch is done
   }
-  void clear() { this->clear_input_(); }
+  // No-op when already empty. clear_input_() publishes to the configured text
+  // sensors, whose on_value automations run synchronously — one that itself
+  // calls phone.clear would otherwise republish the same empty state and
+  // recurse until the stack gave out.
+  void clear() {
+    if (this->input_.empty()) {
+      return;
+    }
+    this->clear_input_();
+  }
 #ifdef USE_TEXT_SENSOR
   void set_password_text_sensor(int index, text_sensor::TextSensor* ts) {
     passwords_[index].text_sensor = ts;
