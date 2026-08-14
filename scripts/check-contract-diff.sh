@@ -49,9 +49,16 @@
 # disagreement means one of them is stale. In particular a NEW required substitution that arrives
 # without its negative fixture would ship unproven.
 #
+# WHERE IT RUNS. On every pull request (base merge-base -> head), AND again on main before a tag is
+# created (last released tag -> HEAD). The second pass is not redundant: the PR pass validates
+# commits that a SQUASH MERGE can rewrite, and a direct push to main never sees a PR at all. Only
+# the main pass reads the commits release-please will actually parse, so it is the one that can
+# still stop a mislabelled permanent tag.
+#
 # Usage:
 #   check-contract-diff.sh [BASE [HEAD]]   # default: origin/main HEAD
 #   check-contract-diff.sh --surface [ROOT]
+#   check-contract-diff.sh --since-release [HEAD]
 #   check-contract-diff.sh --negative-parity [ROOT]
 #   check-contract-diff.sh --self-test
 #
@@ -86,6 +93,12 @@ _clean_value() {
 # A guard whose two names disagree is malformed and is reported rather than silently trusted.
 _refs_in_file() {
   local file="$1" hit a b
+  # Scan with FULL-LINE comments removed: a `${x}` inside a commented-out block is not a reference,
+  # and counting it would invent a required substitution out of dead text. Only whole-line comments
+  # are dropped — trailing `#` is not a safe comment marker inside the C++ lambdas these modules
+  # embed (`#include`, `#define`), and a reference can legitimately share a line with one.
+  local body; body="$(mktemp)"
+  grep -v '^[[:space:]]*#' "$file" 2>/dev/null >"$body"
   while IFS= read -r hit; do
     a="$(printf '%s' "$hit" | sed -E 's/^\$\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*).*/\1/')"
     b="$(printf '%s' "$hit" | sed -E 's/.*[[:space:]]if[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+is[[:space:]]+defined.*/\1/')"
@@ -98,16 +111,25 @@ _refs_in_file() {
       continue
     fi
     printf '%s\n' "$a"
-  done < <(grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+defined' "$file" 2>/dev/null)
+  done < <(grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+defined' "$body" 2>/dev/null)
 
-  grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\}' "$file" 2>/dev/null \
+  grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\}' "$body" 2>/dev/null \
     | sed -E 's/^\$\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}$/\1/'
+  rm -f "$body"
 }
 
 # Print `name<TAB>value` for every key of the top-level `substitutions:` block in one file. The
 # block runs from a column-0 `substitutions:` to the next column-0, non-comment content line; only
 # direct children are contract keys (a nested mapping is that key's value, not a new key).
 _defaults_in_file() {
+  # This extractor reads BLOCK-style `substitutions:` only, which is the form every module uses.
+  # Flow style (`substitutions: {a: b}`) would be silently skipped, and a skipped default reads as
+  # "required" or as a removal — so reject it loudly instead of guessing.
+  if grep -qE '^substitutions:[[:space:]]*[{[]' "$1" 2>/dev/null; then
+    echo "check-contract-diff: UNSUPPORTED — $1: flow-style 'substitutions:' is not parsed; use block style" >&2
+    [ -n "${_CONTRACT_ERR_FILE:-}" ] && echo "$1: flow-style substitutions:" >>"$_CONTRACT_ERR_FILE"
+    return 0
+  fi
   awk '
     function indent(s){ match(s, /^ */); return RLENGTH }
     /^substitutions:[[:space:]]*(#.*)?$/ { inblk=1; child=-1; next }
@@ -415,6 +437,31 @@ check_negative_parity() {
   return "$rc"
 }
 
+# ── release-time gate ─────────────────────────────────────────────────────────────────────────
+
+# Run the gate from the LAST RELEASED tag to HEAD. The released version is read from
+# .release-please-manifest.json, which is release-please's own record of what it last published —
+# more reliable than `git describe`, which would pick up any stray tag.
+run_since_release() {
+  local head="${1:-HEAD}" version tag
+  version="$(sed -nE 's/.*"\."[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+               "$(cd "$SCRIPT_DIR/.." && pwd)/.release-please-manifest.json" 2>/dev/null | head -n1)"
+
+  if [ -z "$version" ]; then
+    echo "check-contract-diff: FAIL — could not read the released version from .release-please-manifest.json"
+    return 1
+  fi
+  tag="v${version}"
+
+  if ! git rev-parse --verify --quiet "refs/tags/${tag}" >/dev/null 2>&1; then
+    echo "check-contract-diff: no released tag '${tag}' yet — nothing to compare against, vacuously ok"
+    return 0
+  fi
+
+  echo "check-contract-diff: gating the next release against the last one (${tag})"
+  run_gate "$tag" "$head"
+}
+
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
 
 _mkmod() { mkdir -p "$1/modules"; cat >"$1/modules/core.yaml"; }
@@ -579,6 +626,24 @@ YAML
     echo "self-test: PASS — a malformed guard fails closed"
   fi
 
+  # A ${ref} inside a commented-out line is dead text, not a contract reference.
+  mkdir -p "$tmp/cmt/modules"
+  printf 'substitutions:\n  a: "1"\nx:\n  # y: ${ghost_name}\n  z: ${a}\n' >"$tmp/cmt/modules/core.yaml"
+  if extract_surface "$tmp/cmt" | grep -q 'ghost_name'; then
+    echo "self-test: FAILED — a reference inside a comment was counted"; rc=1
+  else
+    echo "self-test: PASS — a reference inside a full-line comment is not counted"
+  fi
+
+  # Flow-style substitutions are not parsed, so they must be rejected rather than silently skipped.
+  mkdir -p "$tmp/flow/modules"
+  printf 'substitutions: {a: 1}\nx:\n  y: ${a}\n' >"$tmp/flow/modules/core.yaml"
+  if extract_surface "$tmp/flow" >/dev/null 2>&1; then
+    echo "self-test: FAILED — flow-style substitutions were silently accepted"; rc=1
+  else
+    echo "self-test: PASS — flow-style substitutions fail closed rather than being skipped"
+  fi
+
   # --- negative-harness parity ----------------------------------------------------------------
   mkdir -p "$tmp/par/modules" "$tmp/par/tests/negative"
   printf 'esphome:\n  name: ${device_name}\n' >"$tmp/par/modules/core.yaml"
@@ -608,6 +673,13 @@ YAML
     echo "self-test: FAILED — an unresolvable base ref was treated as a pass"; rc=1
   else
     echo "self-test: PASS — an unresolvable ref fails closed instead of skipping"
+  fi
+
+  # With no released tag yet there is nothing to compare against — vacuous, not a masked failure.
+  if run_since_release >/dev/null 2>&1; then
+    echo "self-test: PASS — --since-release is vacuously ok before the first tag exists"
+  else
+    echo "self-test: FAILED — --since-release did not handle the pre-first-release case"; rc=1
   fi
 
   # --- the gate over real commits -------------------------------------------------------------
@@ -643,6 +715,7 @@ main() {
     --self-test) self_test; return "$?" ;;
     --surface)   extract_surface "${2:-$(cd "$SCRIPT_DIR/.." && pwd)}"; return "$?" ;;
     --negative-parity) check_negative_parity "${2:-}"; return "$?" ;;
+    --since-release)   run_since_release "${2:-HEAD}"; return "$?" ;;
   esac
   run_gate "${1:-origin/main}" "${2:-HEAD}"
 }

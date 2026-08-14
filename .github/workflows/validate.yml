@@ -45,10 +45,14 @@ jobs:
 
       - name: Substitution-contract gate (a breaking change must be declared breaking)
         run: |
+          set -euo pipefail
           bash scripts/check-contract-diff.sh --self-test
-          bash scripts/check-contract-diff.sh \
-            "${{ github.event.pull_request.base.sha }}" \
-            "${{ github.event.pull_request.head.sha }}"
+          # Compare against the MERGE BASE, not the base branch tip. If main moved on after this
+          # branch forked, a substitution main added would look like one this PR removed, and the
+          # gate would demand a breaking marker for a change the PR never made.
+          base="$(git merge-base "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
+          echo "contract baseline (merge-base): ${base}"
+          bash scripts/check-contract-diff.sh "$base" "${{ github.event.pull_request.head.sha }}"
 
       - name: Negative-harness parity (every required substitution has an omit_ fixture)
         run: bash scripts/check-contract-diff.sh --negative-parity

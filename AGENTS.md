@@ -42,15 +42,37 @@ patch, both in `release-please-config.json`.)
 ## How a release happens
 
 1. You merge ordinary PRs into `main` with conventional subjects.
-2. `release-gate.yml` runs on that push: it compiles every validate fixture, and only then lets
-   release-please refresh the release PR holding the computed version and CHANGELOG entry.
+2. `release-gate.yml` runs on that push: it compiles every validate fixture **and** re-runs the
+   substitution-contract gate against the last released tag, and only then lets release-please
+   refresh the release PR holding the computed version and CHANGELOG entry.
 3. You read that PR — the version and the changelog are the reviewable artifact — and merge it.
 4. That merge is another push to `main`, so `release-gate.yml` runs again on the exact commit about
-   to be tagged. The `release` job needs `compile`, so **if that tree does not compile, no tag is
-   ever created.** When it does, release-please creates the tag and the GitHub Release.
+   to be tagged. The `release` job needs both `compile` and `contract`, so **if that tree does not
+   build, or its contract change is not labelled honestly, no tag is ever created.** When both pass,
+   release-please creates the tag and the GitHub Release.
+
+## Merge strategy: never squash
+
+**Squash merging is disabled on this repo, and must stay disabled.** A squash collapses a PR into
+one commit whose subject is the PR title and whose body holds the original subjects. A
+`feat(wifi)!:` marker written on an inner commit therefore becomes ordinary body text, and
+release-please — which parses the subject that lands on `main` — would compute a patch bump for a
+breaking change. The PR-time contract gate would have seen the marker and passed, so the two would
+silently disagree.
+
+Merge commits and rebase both preserve subjects verbatim; use those. The `contract` job in
+`release-gate.yml` is the backstop that catches it anyway, but it catches it at release time, which
+is later and more annoying than not creating the problem.
 
 To force a specific version (the first release, or a deliberate jump), put a `Release-As: 0.1.0`
 footer on a commit that lands in the release.
+
+### Why the contract gate runs twice
+
+On a pull request it compares the **merge base** with the PR head — early, where the author can
+still fix the label. On `main` it compares the **last released tag** with `HEAD`, reading the
+commits release-please will actually parse. Neither subsumes the other: the PR pass never sees a
+direct push to `main`, and it inspects commits that a squash merge could rewrite.
 
 ### Why compile and release live in one workflow
 
@@ -103,7 +125,7 @@ core, and is correctly not required.
 | workflow | trigger | does |
 |---|---|---|
 | `validate.yml` | pull request | all gates + `esphome config` over `tests/validate/` |
-| `release-gate.yml` | push to `main` | job `compile` (real `esphome compile`), then job `release` (release-please) which **needs** it |
+| `release-gate.yml` | push to `main` | jobs `compile` (real `esphome compile`) and `contract` (contract gate vs the last tag), then job `release` (release-please) which **needs** both |
 | `release.yml` | tag push / manual | belt-and-braces compile against an already-published tag |
 
 ## House style
