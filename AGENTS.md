@@ -42,24 +42,32 @@ patch, both in `release-please-config.json`.)
 ## How a release happens
 
 1. You merge ordinary PRs into `main` with conventional subjects.
-2. `release-please.yml` keeps a release PR open, holding the computed version and the CHANGELOG
-   entry. It is refreshed on every push to `main`.
+2. `release-gate.yml` runs on that push: it compiles every validate fixture, and only then lets
+   release-please refresh the release PR holding the computed version and CHANGELOG entry.
 3. You read that PR — the version and the changelog are the reviewable artifact — and merge it.
-4. release-please creates the tag and the GitHub Release.
+4. That merge is another push to `main`, so `release-gate.yml` runs again on the exact commit about
+   to be tagged. The `release` job needs `compile`, so **if that tree does not compile, no tag is
+   ever created.** When it does, release-please creates the tag and the GitHub Release.
 
 To force a specific version (the first release, or a deliberate jump), put a `Release-As: 0.1.0`
 footer on a commit that lands in the release.
 
-### Why the release PR has no CI
+### Why compile and release live in one workflow
 
-release-please opens it with `GITHUB_TOKEN`, and events raised by `GITHUB_TOKEN` do not start
-workflow runs. Nothing is lost: a release PR only edits `CHANGELOG.md` and `version.txt`, so the
-YAML it proposes to tag is exactly the `main` that `release-gate.yml` already compiled. The
-verification lives one step earlier, on `main`, which is also the last point where a failure can
-still prevent a permanent tag.
+Because ordering is the only thing that makes the compile a *gate* rather than a report. A tag is
+permanent, public and pinned by devices in the field, so the compile has to run while the version
+is still a proposal. Split across two workflows, release-please would create the tag on the release
+PR's merge whether or not the compile of that same commit had passed — or even finished. Joined by
+`needs: compile`, the release job is unreachable without a green build of the tree being tagged.
 
-The same rule means an automated tag does not trigger `release.yml`. Run it on demand with
-`workflow_dispatch` (input: the tag) when a tag-time re-verification is wanted.
+This is also why `release-gate.yml` has no `paths:` filter: a release PR edits only `CHANGELOG.md`
+and `version.txt`, so a filter would skip the compile on precisely the push that publishes the tag.
+
+The release PR itself shows no checks, because release-please opens it with `GITHUB_TOKEN` and
+`GITHUB_TOKEN` events do not start workflow runs. That costs nothing here — the commit that matters
+is the merge commit, and that one is gated. The same rule means an automated tag does not trigger
+`release.yml`; run it on demand with `workflow_dispatch` (input: the tag) for a tag-time
+re-verification.
 
 ## Gates
 
@@ -83,14 +91,20 @@ default) — diffs it across the PR, and fails when the change is breaking but n
 It also enforces parity between the required set and `tests/negative/omit_<name>.yaml`, so a new
 required substitution cannot arrive without the fixture that proves it.
 
+Scopes mirror how a config is assembled. `modules/core.yaml` is the base, and every other module
+and board is a scope layered on it (`core ∪ <file>`). Modules are opt-in and composed selectively —
+`tests/validate/phone.yaml` imports no core at all — so treating `modules/` as one namespace would
+let a default in one module mask a required reference in an unrelated one. Boards need the same
+layering in the other direction: `framework_variant` is referenced by every board but defaulted in
+core, and is correctly not required.
+
 ## Workflows
 
 | workflow | trigger | does |
 |---|---|---|
 | `validate.yml` | pull request | all gates + `esphome config` over `tests/validate/` |
-| `release-gate.yml` | push to `main` | the real `esphome compile` over `tests/validate/` |
-| `release-please.yml` | push to `main` | maintains the release PR; tags and releases on merge |
-| `release.yml` | tag push / manual | belt-and-braces compile against a published tag |
+| `release-gate.yml` | push to `main` | job `compile` (real `esphome compile`), then job `release` (release-please) which **needs** it |
+| `release.yml` | tag push / manual | belt-and-braces compile against an already-published tag |
 
 ## House style
 
