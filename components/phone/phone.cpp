@@ -165,6 +165,13 @@ void Phone::process_key_(uint8_t key) {
 
 void Phone::check_timeout_() {
   if (this->input_.empty()) return;
+  // 0 disables the timeout: the input then stands until it is submitted or
+  // cleared explicitly. Without this a 0 would mean "every keypress is already
+  // overdue" and validate on the very first digit, which is never what a caller
+  // asking for no timeout wants. A prop whose enter button drives phone.submit
+  // needs this — a player typing an 8-digit code slowly must not have it
+  // submitted out from under them mid-entry.
+  if (this->sequence_timeout_ == 0) return;
   if (millis() - this->last_key_time_ < this->sequence_timeout_) return;
 
   // Do not log the accumulated input: it is matched against configured passwords, so it is

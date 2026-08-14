@@ -539,6 +539,11 @@ CI compiles the C++ at least once per release.
   whose reset is driven by an automation — has no key to name. The two actions submit and clear the
   accumulated input directly; `phone.submit` ignores empty input, exactly as the enter key does.
 
+  **`sequence_timeout: 0s` disables the timeout.** The default is `3s`, after which a part-typed
+  sequence is validated and cleared on its own. A prop whose enter button drives `phone.submit`
+  wants that off, or a player typing a long code slowly has it submitted out from under them
+  mid-entry. `0s` means the input stands until it is submitted or cleared explicitly.
+
   **Prefer `on_no_match` to a per-password `on_password_wrong`.** The per-entry trigger fires once
   for **every** entry the input did not match, so with N passwords configured a single wrong code
   fires it N times — right when the passwords are independent locks, wrong when they are

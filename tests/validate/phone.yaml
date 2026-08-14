@@ -77,6 +77,9 @@ phone:
             input: true
             pullup: true
     keys: "123456789*0#"
+    # No timeout: the enter button above owns submission, so a slowly-typed
+    # code must not be validated out from under the player mid-entry.
+    sequence_timeout: 0s
     passwords:
       # Runtime-editable: resolved from the text entity on every submission.
       - password: !lambda "return id(text_password).state;"
