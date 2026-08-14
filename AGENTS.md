@@ -6,26 +6,42 @@ firmware in the field will keep fetching. Everything below follows from that.
 
 ## Commit convention
 
-**Strict [Conventional Commits](https://www.conventionalcommits.org/), with the Jira key at the
-END of the subject:**
+**Strict [Conventional Commits](https://www.conventionalcommits.org/), and NO issue key:**
 
 ```
-feat(wifi): three optional station slots and a provisioning-only mode (AIOT-107)
-fix(ota): gate enable_ota_rollback on ${ota_rollback} (AIOT-98)
-feat(mqtt)!: make mqtt_port a required substitution with no default (AIOT-87)
+feat(wifi): three optional station slots and a provisioning-only mode
+fix(ota): gate enable_ota_rollback on ${ota_rollback}
+feat(mqtt)!: make the broker environment-pinned
 ```
 
-This DIVERGES from the `site` repo's `AGENTS.md` §15, which puts the key first as
-`[AIOT-107] feat(wifi): …`. Do not carry that form here. release-please parses commits with a
-spec-strict parser: a leading `[AIOT-107] ` makes the whole subject unparseable, the commit is
-ignored for versioning, and a release silently omits the change. The key still appears in every
-subject, so branch ↔ ticket ↔ commit traceability is unchanged.
+This DIVERGES from the `site` repo's `AGENTS.md` §15 in two ways, and both are deliberate.
 
-- Branches keep the `site` convention: `feat/AIOT-111`, `fix/AIOT-100`, `chore/AIOT-111`.
+**No leading `[KEY] `.** release-please parses commits with a spec-strict parser: a leading
+`[AIOT-107] ` makes the whole subject unparseable, the commit is ignored for versioning, and a
+release silently omits the change.
+
+**No trailing `(KEY)` either — this repo is PUBLIC.** A commit subject here is not a private note.
+release-please copies it verbatim into `CHANGELOG.md` and ships it with every tag, so an issue key
+in a subject publishes the internal tracker permanently: released tags are immutable
+(`released-tags-are-permanent`) and history cannot be rewritten, because devices in the field pin
+refs. The same applies to branch names, which GitHub embeds in the merge commit it writes.
+
+Traceability is not lost, it is **inverted**: the private ticket links out to the public PR, rather
+than the public PR naming the private ticket. Only the direction changes — and the direction that
+leaks is the one removed. When you open a PR, put its URL on the ticket.
+
+- **Branches are slugs, not keys:** `feat/broker-env-pinning`, `fix/ota-rollback-timing`.
+- **PR titles are the Conventional Commits subject**, with no key and no prefix:
+  `feat(mqtt)!: pin the broker per environment`.
+- **PR bodies follow `.github/PULL_REQUEST_TEMPLATE.md`** and name nothing internal.
 - A breaking change is marked `type(scope)!:`, a `BREAKING CHANGE:` footer, or both. Bodies and
   footers are allowed here (the `site` single-line rule does not apply).
 - `feat` / `fix` / `perf` / `refactor` / `docs` appear in the changelog; `test` / `build` / `ci` /
   `chore` / `style` are parsed but hidden.
+
+`check-public-naming.sh` enforces all four surfaces on every pull request. Commits and tags made
+**before** this rule existed still carry keys; that text is already public and cannot be
+unpublished, so the gate governs what is added from here on and never scans tracked files.
 
 ## Versioning
 
@@ -120,6 +136,7 @@ CI runs `--self-test` before the real check, so a gate that has been silently de
 | `check-rollback-timing.sh` | `safe_mode` confirms after the OTA rollback watchdog |
 | `check-negative.sh` | every required substitution actually fails validation when omitted |
 | `check-contract-diff.sh` | a breaking substitution-contract change must be committed as breaking |
+| `check-public-naming.sh` | no internal issue key or tracker link in branch, PR title, PR body or commit subject; PR title and subjects are Conventional Commits |
 | `materialize-sdk-ref.sh` | `__SDK_REF__` resolves totally, to the revision under test |
 
 `check-contract-diff.sh` is what makes the version number mean something. It derives the
@@ -143,6 +160,7 @@ core, and is correctly not required.
 | workflow | trigger | does |
 |---|---|---|
 | `validate.yml` | pull request | all gates + `esphome config` over `tests/validate/` |
+| `public-naming.yml` | pull request (incl. `edited`) | the public-naming gate over branch, title, body and commit subjects |
 | `release-gate.yml` | push to `main` | `discover` → `compile` (one parallel job per fixture, real `esphome compile`), plus `negative` and `gates` (every invariant script + contract gate vs the last published tag); then `release` (release-please), which **needs** all three |
 | `release.yml` | tag push / manual | belt-and-braces compile against an already-published tag |
 

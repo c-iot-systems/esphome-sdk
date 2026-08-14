@@ -1,0 +1,55 @@
+name: public-naming
+
+# Keeps the private issue tracker out of this public repository's public surfaces: the branch name,
+# the PR title, the PR body and the commit subjects. See scripts/check-public-naming.sh for why each
+# surface matters and why the contents of tracked files are deliberately NOT scanned.
+#
+# `edited` is in the trigger list on purpose. The default `pull_request` types are opened,
+# synchronize and reopened — none of which fire when someone edits a title or body after opening. A
+# title gate that cannot see a retitled PR is not a gate, so this workflow watches edits too.
+#
+# It is its own workflow rather than a step in validate.yml so that a title edit re-runs only this
+# check (seconds, no toolchain) instead of the whole ESPHome validation.
+#
+# Deliberately NOT duplicated into release-gate.yml, unlike every other gate here. On `main` the
+# subjects are already written, and the only way to change one is to rewrite published history —
+# which this repo cannot do, because devices in the field pin refs and released tags are immutable.
+# A gate there could only ever be permanently red with no legal fix. The pull request is the last
+# point where the author can still edit the text, so that is where it is enforced.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  naming:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # The commit-subject scan walks from the merge base, so it needs real history.
+          fetch-depth: 0
+
+      - name: Public-naming gate (no internal issue keys in public surfaces)
+        # A PR title and body are attacker-controlled text. They are passed as ENVIRONMENT
+        # variables, never interpolated into the shell command, so nothing in them can be word-split
+        # into arguments or expanded as a command substitution.
+        env:
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-public-naming.sh --self-test
+          printf '%s' "$PR_BODY" >"${RUNNER_TEMP}/pr-body.md"
+          # Merge base, not the base tip: commits main gained after this branch forked are not
+          # this PR's to answer for.
+          base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          echo "scanning commits ${base}..${HEAD_SHA}"
+          PR_BODY_FILE="${RUNNER_TEMP}/pr-body.md" COMMIT_RANGE="${base}..${HEAD_SHA}" \
+            bash scripts/check-public-naming.sh
