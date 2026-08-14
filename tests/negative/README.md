@@ -40,8 +40,15 @@ fixture sets a slot's password with no SSID (slot 1 in one, slot 2 in the other)
 is the guard against a forgotten or mistyped SSID name quietly turning a configured network into no
 network at all.
 
-Coverage owned by SDK-3 (criotive_mqtt.yaml + ota.yaml): omitting `mqtt_broker`,
-`mqtt_ca_certificate`, `mqtt_username`, `mqtt_password`, `ota_password` or `ota_http_server`. The
+Coverage owned by SDK-3 (criotive_mqtt.yaml + ota.yaml): omitting `criotive_env`, `mqtt_username`,
+`mqtt_password`, `ota_password` or `ota_http_server`. The
 MQTT/OTA fixtures import all four modules (core, wifi, criotive_mqtt, ota) so that the *only* missing
 input is the one under test — the failure is attributable to that substitution, not to an unresolved
 cross-module id (criotive_mqtt's `on_connect` references ota's `script_rollback`).
+
+`invalid_criotive_env.yaml` covers the other half of that substitution, and is why it is not named
+`omit_`: `criotive_env` is the one required input whose *value* is constrained, not merely its
+presence. It selects the broker host, the TLS port and the trust anchor together, so a value that is
+not a deployment we run has no connection to resolve to. The fixture sets `criotive_env: staging` and
+must fail — proving an unrecognised environment is rejected at validation time rather than flashed
+onto a device that can never complete a handshake.
