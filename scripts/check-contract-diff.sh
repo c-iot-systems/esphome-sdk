@@ -90,7 +90,11 @@ _refs_in_file() {
     a="$(printf '%s' "$hit" | sed -E 's/^\$\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*).*/\1/')"
     b="$(printf '%s' "$hit" | sed -E 's/.*[[:space:]]if[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+is[[:space:]]+defined.*/\1/')"
     if [ "$a" != "$b" ]; then
+      # Fail CLOSED. A malformed guard silently drops a name from the surface, which would hide
+      # both a breaking removal and a missing negative fixture — the two things this gate exists
+      # to catch. The flag file survives the subshells that $(extract_surface) runs in.
       echo "check-contract-diff: MALFORMED — ${file}: guard '${hit}' names '${a}' but tests '${b}'" >&2
+      [ -n "${_CONTRACT_ERR_FILE:-}" ] && echo "${file}: ${hit}" >>"$_CONTRACT_ERR_FILE"
       continue
     fi
     printf '%s\n' "$a"
@@ -139,52 +143,87 @@ _collect() {
 #   optional <scope> <name> = <default>
 #
 # A name is CONTRACT if it is referenced or defaulted; it is OPTIONAL if a default is reachable in
-# its scope and REQUIRED otherwise. Scopes follow how a config is actually assembled: `modules`
-# resolves within modules/ alone, and each board resolves against modules/ PLUS that one board —
-# which is why `framework_variant`, referenced by every board but defaulted in modules/core.yaml,
-# is not required. A name already carried by the `modules` scope is not repeated per board, so a
-# module-level default change is reported once rather than once per board.
+# its scope and REQUIRED otherwise.
+#
+# SCOPES MIRROR HOW A CONFIG IS ASSEMBLED. `modules/core.yaml` is the base every networked config
+# imports, and every other module and board is a scope layered on it: `core ∪ <file>`. Modules are
+# OPT-IN and composed selectively — tests/validate/phone.yaml is explicitly self-contained and
+# imports no core — so resolving all of modules/ as one namespace would let a default in one
+# module mask a required reference in an unrelated one, and the surface would not move even though
+# a consumer importing only the second module breaks. Boards need the same layering in the other
+# direction: `framework_variant` and `ota_rollback` are referenced by every board but defaulted in
+# core, and are correctly not required.
+#
+# Residual, deliberately accepted: a name defaulted in core and referenced elsewhere resolves as
+# optional. That is right for every config that imports core, and a module that skips core is
+# self-contained by construction. Names already stated by the `core` scope are not repeated per
+# scope, so a core default change is reported once rather than once per module.
 extract_surface() {
-  local root="$1" scope f name val
+  local root="$1" scope f name val rc=0
   local tmp; tmp="$(mktemp -d)"
 
-  : >"$tmp/mrefs"; : >"$tmp/mdefs"
-  _collect "$root/modules" "$tmp/mrefs" "$tmp/mdefs"
-  cut -f1 "$tmp/mdefs" | sort -u >"$tmp/mdefn"
+  local own_err=0
+  if [ -z "${_CONTRACT_ERR_FILE:-}" ]; then
+    _CONTRACT_ERR_FILE="$tmp/malformed"; : >"$_CONTRACT_ERR_FILE"; own_err=1
+  fi
 
-  # names owned by the modules scope: everything referenced or defaulted there.
-  cat "$tmp/mrefs" "$tmp/mdefn" | grep -v '^$' | sort -u >"$tmp/mnames"
-  while IFS= read -r name; do
-    if grep -qxF "$name" "$tmp/mdefn"; then
-      val="$(awk -F'\t' -v k="$name" '$1==k {print $2; exit}' "$tmp/mdefs")"
-      printf 'optional modules %s = %s\n' "$name" "$(_clean_value "$val")"
-    else
-      printf 'required modules %s\n' "$name"
-    fi
-  done <"$tmp/mnames" | sort -u
+  local core="$root/modules/core.yaml"
+  : >"$tmp/crefs"; : >"$tmp/cdefs"
+  if [ -f "$core" ]; then
+    _refs_in_file "$core" >>"$tmp/crefs"
+    _defaults_in_file "$core" >>"$tmp/cdefs"
+  fi
+  cut -f1 "$tmp/cdefs" | sort -u >"$tmp/cdefn"
 
-  # each board is its own scope, resolving against modules ∪ board.
-  [ -d "$root/hardware" ] || { rm -rf "$tmp"; return 0; }
-  while IFS= read -r -d '' f; do
-    scope="$(basename "$f")"; scope="${scope%.*}"
-    : >"$tmp/brefs"; : >"$tmp/bdefs"
-    _refs_in_file "$f" >>"$tmp/brefs"
-    _defaults_in_file "$f" >>"$tmp/bdefs"
-    cut -f1 "$tmp/bdefs" | sort -u >"$tmp/bdefn"
-
-    cat "$tmp/brefs" "$tmp/bdefn" | grep -v '^$' | sort -u >"$tmp/bnames"
+  # Emit one scope: names referenced or defaulted in FILES, resolved against core ∪ FILES.
+  # `$2` is a file listing names already claimed by an earlier scope, which are skipped.
+  _emit_scope() {
+    local scope="$1" claimed="$2"; shift 2
+    local f name val
+    : >"$tmp/srefs"; : >"$tmp/sdefs"
+    for f in "$@"; do
+      [ -f "$f" ] || continue
+      _refs_in_file "$f" >>"$tmp/srefs"
+      _defaults_in_file "$f" >>"$tmp/sdefs"
+    done
+    cut -f1 "$tmp/sdefs" | sort -u >"$tmp/sdefn"
+    cat "$tmp/srefs" "$tmp/sdefn" | grep -v '^$' | sort -u >"$tmp/snames"
     while IFS= read -r name; do
-      grep -qxF "$name" "$tmp/mnames" && continue        # already stated by the modules scope
-      if grep -qxF "$name" "$tmp/bdefn"; then
-        val="$(awk -F'\t' -v k="$name" '$1==k {print $2; exit}' "$tmp/bdefs")"
+      [ -s "$claimed" ] && grep -qxF "$name" "$claimed" && continue
+      if grep -qxF "$name" "$tmp/sdefn"; then
+        val="$(awk -F'\t' -v k="$name" '$1==k {print $2; exit}' "$tmp/sdefs")"
+        printf 'optional %s %s = %s\n' "$scope" "$name" "$(_clean_value "$val")"
+      elif grep -qxF "$name" "$tmp/cdefn"; then
+        val="$(awk -F'\t' -v k="$name" '$1==k {print $2; exit}' "$tmp/cdefs")"
         printf 'optional %s %s = %s\n' "$scope" "$name" "$(_clean_value "$val")"
       else
         printf 'required %s %s\n' "$scope" "$name"
       fi
-    done <"$tmp/bnames" | sort -u
-  done < <(find "$root/hardware" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
+    done <"$tmp/snames" | sort -u
+  }
 
+  : >"$tmp/claimed"
+  if [ -f "$core" ]; then
+    _emit_scope core "$tmp/claimed" "$core"
+    cat "$tmp/crefs" "$tmp/cdefn" | grep -v '^$' | sort -u >"$tmp/claimed"
+  fi
+
+  local d
+  for d in "$root/modules" "$root/hardware"; do
+    [ -d "$d" ] || continue
+    while IFS= read -r -d '' f; do
+      [ "$f" = "$core" ] && continue
+      scope="$(basename "$f")"; scope="${scope%.*}"
+      _emit_scope "$scope" "$tmp/claimed" "$f"
+    done < <(find "$d" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
+  done
+
+  if [ "$own_err" -eq 1 ]; then
+    [ -s "$_CONTRACT_ERR_FILE" ] && rc=1
+    unset _CONTRACT_ERR_FILE
+  fi
   rm -rf "$tmp"
+  return "$rc"
 }
 
 # Materialize a git ref into DIR (whole tree; the repo is small enough that this is cheaper than
@@ -192,7 +231,11 @@ extract_surface() {
 _extract_ref() {
   local ref="$1" dir="$2"
   mkdir -p "$dir"
+  # Both halves must succeed: a silently empty tree would read as "the whole contract was removed"
+  # or "nothing changed", depending on which side failed.
   git archive "$ref" 2>/dev/null | tar -x -C "$dir" 2>/dev/null
+  local st=("${PIPESTATUS[@]}")
+  [ "${st[0]}" -eq 0 ] && [ "${st[1]}" -eq 0 ]
 }
 
 # ── commit-range inspection ───────────────────────────────────────────────────────────────────
@@ -202,7 +245,10 @@ _extract_ref() {
 _range_declares_breaking() {
   local base="$1" head="$2" subj body
   while IFS= read -r subj; do
-    [[ "$subj" =~ ^[a-zA-Z]+(\([^\)]*\))?![[:space:]]*: ]] && return 0
+    # `!:` must be adjacent — `feat(wifi)! : x` is NOT a valid Conventional Commit subject, and
+    # release-please's parser ignores it. Accepting it here would let the gate pass while the
+    # released version silently disagreed with the contract change.
+    [[ "$subj" =~ ^[a-zA-Z]+(\([^\)]*\))?!: ]] && return 0
   done < <(git log --format='%s' "${base}..${head}" 2>/dev/null)
   body="$(git log --format='%b' "${base}..${head}" 2>/dev/null)"
   grep -qE '^BREAKING[ -]CHANGE:' <<<"$body" && return 0
@@ -279,18 +325,37 @@ compare_surfaces() {
 # Full gate: extract BASE and HEAD surfaces from git, classify, and require a breaking marker in
 # the range when the contract change is breaking.
 run_gate() {
-  local base="$1" head="$2" rc=0
+  local base="$1" head="$2" rc=0 ref
   local tmp; tmp="$(mktemp -d)"
 
-  if ! git rev-parse --verify --quiet "$base" >/dev/null; then
-    echo "check-contract-diff: SKIP — base ref '${base}' is not resolvable here (shallow clone?); contract diff not evaluated"
-    rm -rf "$tmp"; return 0
-  fi
+  # Fail CLOSED on anything that would leave the contract unexamined. CI checks out with
+  # fetch-depth: 0 and passes explicit SHAs, so an unresolvable ref is a broken invocation, not a
+  # benign shallow clone — and skipping here would remove the one safeguard on a permanent tag.
+  for ref in "$base" "$head"; do
+    if ! git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1; then
+      echo "check-contract-diff: FAIL — ref '${ref}' does not resolve to a commit here; the contract was NOT compared."
+      echo "check-contract-diff:        CI must check out with fetch-depth: 0 and pass resolvable revisions."
+      rm -rf "$tmp"; return 1
+    fi
+  done
 
-  _extract_ref "$base" "$tmp/base"
-  _extract_ref "$head" "$tmp/head"
+  for ref in base head; do
+    local val; val="$([ "$ref" = base ] && printf '%s' "$base" || printf '%s' "$head")"
+    if ! _extract_ref "$val" "$tmp/$ref"; then
+      echo "check-contract-diff: FAIL — could not extract the tree at '${val}'; the contract was NOT compared."
+      rm -rf "$tmp"; return 1
+    fi
+  done
+
+  : >"$tmp/malformed"; export _CONTRACT_ERR_FILE="$tmp/malformed"
   extract_surface "$tmp/base" >"$tmp/base.surface"
   extract_surface "$tmp/head" >"$tmp/head.surface"
+  if [ -s "$_CONTRACT_ERR_FILE" ]; then
+    echo "check-contract-diff: FAIL — malformed required-substitution guard(s); the surface is incomplete, so the diff cannot be trusted:"
+    sed 's/^/check-contract-diff:        /' "$_CONTRACT_ERR_FILE"
+    unset _CONTRACT_ERR_FILE; rm -rf "$tmp"; return 1
+  fi
+  unset _CONTRACT_ERR_FILE
 
   echo "check-contract-diff: comparing contract ${base} -> ${head}"
   if compare_surfaces "$tmp/base.surface" "$tmp/head.surface"; then
@@ -317,7 +382,14 @@ check_negative_parity() {
   local root="${1:-$(cd "$SCRIPT_DIR/.." && pwd)}" rc=0 name
   local tmp; tmp="$(mktemp -d)"
 
-  extract_surface "$root" | sed -nE 's/^required modules ([A-Za-z0-9_]+)$/\1/p' | sort -u >"$tmp/derived"
+  : >"$tmp/malformed"; export _CONTRACT_ERR_FILE="$tmp/malformed"
+  extract_surface "$root" | sed -nE 's/^required [^ ]+ ([A-Za-z0-9_]+)$/\1/p' | sort -u >"$tmp/derived"
+  if [ -s "$_CONTRACT_ERR_FILE" ]; then
+    echo "check-contract-diff: FAIL — malformed required-substitution guard(s); the required set is incomplete:"
+    sed 's/^/check-contract-diff:        /' "$_CONTRACT_ERR_FILE"
+    unset _CONTRACT_ERR_FILE; rm -rf "$tmp"; return 1
+  fi
+  unset _CONTRACT_ERR_FILE
   find "$root/tests/negative" -maxdepth 1 -name 'omit_*.yaml' -printf '%f\n' 2>/dev/null \
     | sed -E 's/^omit_(.*)\.yaml$/\1/' | sort -u >"$tmp/pinned"
 
@@ -394,9 +466,9 @@ mqtt:
   client_id: ${mqtt_client_id}
 YAML
   extract_surface "$tmp/a" >"$tmp/a.surface"
-  if grep -qx 'required modules mqtt_broker' "$tmp/a.surface" \
-     && grep -qx 'optional modules logger_level = NONE' "$tmp/a.surface" \
-     && grep -qx 'optional modules ota_attempts = 50' "$tmp/a.surface"; then
+  if grep -qx 'required core mqtt_broker' "$tmp/a.surface" \
+     && grep -qx 'optional core logger_level = NONE' "$tmp/a.surface" \
+     && grep -qx 'optional core ota_attempts = 50' "$tmp/a.surface"; then
     echo "self-test: PASS — surface extracts guards as required and defaults as optional (comment/quotes stripped)"
   else
     echo "self-test: FAILED — surface extraction"; cat "$tmp/a.surface"; rc=1
@@ -404,7 +476,7 @@ YAML
 
   # A PLAIN ${ref} with no default is required too — ESPHome fails on an undefined substitution
   # with or without the guard. This is how device_name is declared.
-  if grep -qx 'required modules mqtt_client_id' "$tmp/a.surface"; then
+  if grep -qx 'required core mqtt_client_id' "$tmp/a.surface"; then
     echo "self-test: PASS — a plain, undefaulted reference is required (the device_name case)"
   else
     echo "self-test: FAILED — plain undefaulted reference not treated as required"; rc=1
@@ -418,7 +490,7 @@ substitutions:
 ota:
   url: "${ ota_http_server_test if ota_http_server_test is defined else 1/0 }"
 YAML
-  if [ "$(extract_surface "$tmp/both")" = "optional modules ota_http_server_test = fallback" ]; then
+  if [ "$(extract_surface "$tmp/both")" = "optional core ota_http_server_test = fallback" ]; then
     echo "self-test: PASS — guarded AND defaulted resolves to optional (ota_http_server_test case)"
   else
     echo "self-test: FAILED — guarded+defaulted misclassified"; extract_surface "$tmp/both"; rc=1
@@ -429,7 +501,7 @@ YAML
   mkdir -p "$tmp/fw/modules" "$tmp/fw/hardware"
   printf 'substitutions:\n  framework_variant: esp-idf\n' >"$tmp/fw/modules/core.yaml"
   printf 'esphome:\n  framework: ${framework_variant}\n'  >"$tmp/fw/hardware/board.yaml"
-  if [ "$(extract_surface "$tmp/fw")" = "optional modules framework_variant = esp-idf" ]; then
+  if [ "$(extract_surface "$tmp/fw")" = "optional core framework_variant = esp-idf" ]; then
     echo "self-test: PASS — a board reference defaulted in modules/ is not required (framework_variant case)"
   else
     echo "self-test: FAILED — cross-scope default resolution"; extract_surface "$tmp/fw"; rc=1
@@ -450,31 +522,31 @@ YAML
   _expect_cmp ok "$tmp/a2.surface" "$tmp/a2.surface" "a real two-board surface is stable against itself" || rc=1
 
   # --- classification -----------------------------------------------------------------------
-  printf 'optional modules a = 1\nrequired modules r\n'             >"$tmp/base"
-  printf 'optional modules a = 1\nrequired modules r\n'             >"$tmp/same"
+  printf 'optional core a = 1\nrequired core r\n'             >"$tmp/base"
+  printf 'optional core a = 1\nrequired core r\n'             >"$tmp/same"
   _expect_cmp ok "$tmp/base" "$tmp/same" "identical surfaces are non-breaking" || rc=1
 
-  printf 'optional modules a = 1\n'                                  >"$tmp/reqgone"
+  printf 'optional core a = 1\n'                                  >"$tmp/reqgone"
   _expect_cmp breaking "$tmp/base" "$tmp/reqgone" "removing a required substitution is breaking" || rc=1
 
-  printf 'optional modules a = 1\noptional modules r = x\n'         >"$tmp/relaxed"
+  printf 'optional core a = 1\noptional core r = x\n'         >"$tmp/relaxed"
   _expect_cmp ok "$tmp/base" "$tmp/relaxed" "a required substitution gaining a default is a relaxation" || rc=1
 
-  printf 'optional modules a = 1\nrequired modules r\nrequired modules n\n' >"$tmp/newreq"
+  printf 'optional core a = 1\nrequired core r\nrequired core n\n' >"$tmp/newreq"
   _expect_cmp breaking "$tmp/base" "$tmp/newreq" "adding a required substitution is breaking" || rc=1
 
-  printf 'required modules a\nrequired modules r\n'                 >"$tmp/tightened"
+  printf 'required core a\nrequired core r\n'                 >"$tmp/tightened"
   _expect_cmp breaking "$tmp/base" "$tmp/tightened" "an optional substitution losing its default is breaking" || rc=1
 
-  printf 'required modules r\n'                                      >"$tmp/optgone"
+  printf 'required core r\n'                                      >"$tmp/optgone"
   _expect_cmp breaking "$tmp/base" "$tmp/optgone" "removing an optional substitution is breaking" || rc=1
 
-  printf 'optional modules a = 1\noptional modules b = 2\nrequired modules r\n' >"$tmp/added"
+  printf 'optional core a = 1\noptional core b = 2\nrequired core r\n' >"$tmp/added"
   _expect_cmp ok "$tmp/base" "$tmp/added" "adding an optional substitution is non-breaking" || rc=1
 
-  printf 'optional modules a = 9\nrequired modules r\n'             >"$tmp/defchg"
+  printf 'optional core a = 9\nrequired core r\n'             >"$tmp/defchg"
   _expect_cmp ok "$tmp/base" "$tmp/defchg" "a changed default is non-breaking (reported, not gated)" || rc=1
-  if compare_surfaces "$tmp/base" "$tmp/defchg" | grep -q "REVIEW — default for 'a' (modules) changed"; then
+  if compare_surfaces "$tmp/base" "$tmp/defchg" | grep -q "REVIEW — default for 'a' (core) changed"; then
     echo "self-test: PASS — a changed default is reported for review"
   else
     echo "self-test: FAILED — changed default not reported"; rc=1
@@ -485,6 +557,27 @@ YAML
   printf 'optional hds_v1_0 p = 7\noptional hds_v1_1 p = 23\n'      >"$tmp/twoboards"
   printf 'optional hds_v1_1 p = 23\n'                                >"$tmp/oneboard"
   _expect_cmp breaking "$tmp/twoboards" "$tmp/oneboard" "dropping a pin from one board is breaking for that board" || rc=1
+
+  # A module that is NOT core gets its own scope, so a default in an unrelated module cannot mask
+  # a required reference. Without per-module scoping both files merged into one namespace and the
+  # reference in b.yaml resolved against a.yaml's default.
+  mkdir -p "$tmp/mask/modules"
+  printf 'substitutions:\n  shared_name: fromA\n' >"$tmp/mask/modules/a.yaml"
+  printf 'x:\n  y: ${shared_name}\n'              >"$tmp/mask/modules/b.yaml"
+  if extract_surface "$tmp/mask" | grep -qx 'required b shared_name'; then
+    echo "self-test: PASS — a default in an unrelated module does not mask a required reference"
+  else
+    echo "self-test: FAILED — cross-module masking"; extract_surface "$tmp/mask"; rc=1
+  fi
+
+  # A malformed guard must FAIL CLOSED, not just warn: it silently drops a name from the surface.
+  mkdir -p "$tmp/bad/modules"
+  printf 'x:\n  y: "${ alpha if beta is defined else 1/0 }"\n' >"$tmp/bad/modules/core.yaml"
+  if extract_surface "$tmp/bad" >/dev/null 2>&1; then
+    echo "self-test: FAILED — a malformed guard did not fail closed"; rc=1
+  else
+    echo "self-test: PASS — a malformed guard fails closed"
+  fi
 
   # --- negative-harness parity ----------------------------------------------------------------
   mkdir -p "$tmp/par/modules" "$tmp/par/tests/negative"
@@ -510,6 +603,13 @@ YAML
     echo "self-test: FAILED — stale negative fixture not detected"; rc=1
   fi
 
+  # An unresolvable ref must FAIL, not skip — skipping would silently drop the safeguard.
+  if ( cd "$tmp" && run_gate "definitely-not-a-ref" "HEAD" ) >/dev/null 2>&1; then
+    echo "self-test: FAILED — an unresolvable base ref was treated as a pass"; rc=1
+  else
+    echo "self-test: PASS — an unresolvable ref fails closed instead of skipping"
+  fi
+
   # --- the gate over real commits -------------------------------------------------------------
   local OLD NEW_RENAMED NEW_ADDED
   OLD=$'substitutions:\n  wifi_ssid: ""\n'
@@ -522,6 +622,14 @@ YAML
     "the same rename marked with ! is accepted" "$OLD" "$NEW_RENAMED" || rc=1
   _expect_gate pass "feat(wifi): add a second station slot" \
     "a non-breaking addition needs no marker" "$OLD" "$NEW_ADDED" || rc=1
+  # `! :` is not a valid Conventional Commit subject and release-please ignores it, so the gate
+  # must not accept it either — otherwise the gate passes while the version disagrees.
+  _expect_gate fail "feat(wifi)! : rename the ssid substitution" \
+    "a detached '! :' marker is not accepted as breaking" "$OLD" "$NEW_RENAMED" || rc=1
+  _expect_gate pass "feat(wifi): rename the ssid substitution
+
+BREAKING CHANGE: wifi_ssid is now wifi_network" \
+    "a BREAKING CHANGE footer is accepted as breaking" "$OLD" "$NEW_RENAMED" || rc=1
 
   rm -rf "$tmp"
   [ "$rc" -eq 0 ] && echo "self-test: all checks passed" || echo "self-test: FAILURES above"
@@ -533,7 +641,7 @@ YAML
 main() {
   case "${1:-}" in
     --self-test) self_test; return "$?" ;;
-    --surface)   extract_surface "${2:-$(cd "$SCRIPT_DIR/.." && pwd)}"; return 0 ;;
+    --surface)   extract_surface "${2:-$(cd "$SCRIPT_DIR/.." && pwd)}"; return "$?" ;;
     --negative-parity) check_negative_parity "${2:-}"; return "$?" ;;
   esac
   run_gate "${1:-origin/main}" "${2:-HEAD}"
