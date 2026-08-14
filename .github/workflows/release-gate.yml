@@ -13,10 +13,13 @@ name: release-gate
 #
 # This is why there is no `paths:` filter. A release PR only edits CHANGELOG.md and version.txt,
 # so a filter would skip the compile on exactly the push that publishes the tag.
+#
+# `push: branches: [main]` is the ONLY trigger. A workflow_dispatch could be launched from a feature
+# branch, where checkout would compile that branch while release-please — which targets the default
+# branch unless told otherwise — released main: a release of a tree that was never compiled.
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,11 +27,10 @@ permissions:
 env:
   ESPHOME_VERSION: "2026.5.1"
 
-# Never cancel in flight: a cancelled run is a run whose release job never happened, and the next
-# push would have to re-do it. Queue instead.
-concurrency:
-  group: release-gate-${{ github.ref }}
-  cancel-in-progress: false
+# Deliberately NO `concurrency:` group. Within a group GitHub keeps only the newest PENDING run and
+# cancels older ones, even with cancel-in-progress: false — so a burst of pushes could cancel the
+# pending run for the release PR's merge commit and silently skip that release. Every push to main
+# gets its own run instead.
 
 jobs:
   compile:
@@ -74,8 +76,26 @@ jobs:
             esphome compile "$f"
           done
 
+  # The contract gate runs AGAIN here, against the last released tag. On a PR it inspects commits
+  # that a squash merge can rewrite, and a direct push to main never has a PR at all; this pass
+  # reads the commits release-please will actually parse.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Substitution-contract gate since the last release
+        run: |
+          bash scripts/check-contract-diff.sh --self-test
+          bash scripts/check-contract-diff.sh --since-release "${{ github.sha }}"
+
+      - name: Negative-harness parity
+        run: bash scripts/check-contract-diff.sh --negative-parity
+
   release:
-    needs: compile
+    needs: [compile, contract]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,3 +108,6 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Explicit rather than inherited, so this job can never act on a branch other than the
+          # one the compile and contract jobs just verified.
+          target-branch: main
