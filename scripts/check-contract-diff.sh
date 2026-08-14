@@ -111,7 +111,16 @@ _refs_in_file() {
       continue
     fi
     printf '%s\n' "$a"
-  done < <(grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+defined' "$body" 2>/dev/null)
+  done < <(grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+defined[[:space:]]+else[[:space:]]+1/0[[:space:]]*\}' "$body" 2>/dev/null)
+
+  # An `if <name> is defined` whose else-branch is NOT `1/0` does not fail the render — it supplies
+  # a fallback, which makes the substitution OPTIONAL with a default this extractor cannot read from
+  # a `substitutions:` block. Classifying it either way would be a guess, so fail closed.
+  if grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+if[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+defined[[:space:]]+else[[:space:]]+[^}]*\}' "$body" 2>/dev/null \
+       | grep -qvE 'else[[:space:]]+1/0[[:space:]]*\}'; then
+    echo "check-contract-diff: UNSUPPORTED — ${file}: an 'is defined' guard uses a fallback other than 'else 1/0'; its default cannot be derived" >&2
+    [ -n "${_CONTRACT_ERR_FILE:-}" ] && echo "${file}: non-1/0 guard fallback" >>"$_CONTRACT_ERR_FILE"
+  fi
 
   grep -oE '\$\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\}' "$body" 2>/dev/null \
     | sed -E 's/^\$\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}$/\1/'
@@ -240,7 +249,7 @@ extract_surface() {
 
   : >"$tmp/claimed"
   if [ -f "$core" ]; then
-    _emit_scope core "$tmp/claimed" "$core"
+    _emit_scope modules/core.yaml "$tmp/claimed" "$core"
     cat "$tmp/crefs" "$tmp/cdefn" | grep -v '^$' | sort -u >"$tmp/claimed"
   fi
 
@@ -249,8 +258,10 @@ extract_surface() {
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
       [ "$f" = "$core" ] && continue
-      scope="$(basename "$f")"; scope="${scope%.*}"
-      _emit_scope "$scope" "$tmp/claimed" "$f"
+      # Scope identity is the full repo-relative PATH. A basename stem would make modules/foo.yaml
+      # and hardware/foo.yml one scope, so a substitution removed from one would look like it
+      # survived in the other.
+      _emit_scope "${f#"$root"/}" "$tmp/claimed" "$f"
     done < <(find "$d" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 | sort -z)
   done
 
@@ -541,9 +552,9 @@ mqtt:
   client_id: ${mqtt_client_id}
 YAML
   extract_surface "$tmp/a" >"$tmp/a.surface"
-  if grep -qx 'required core mqtt_broker' "$tmp/a.surface" \
-     && grep -qx 'optional core logger_level = NONE' "$tmp/a.surface" \
-     && grep -qx 'optional core ota_attempts = 50' "$tmp/a.surface"; then
+  if grep -qx 'required modules/core.yaml mqtt_broker' "$tmp/a.surface" \
+     && grep -qx 'optional modules/core.yaml logger_level = NONE' "$tmp/a.surface" \
+     && grep -qx 'optional modules/core.yaml ota_attempts = 50' "$tmp/a.surface"; then
     echo "self-test: PASS — surface extracts guards as required and defaults as optional (comment/quotes stripped)"
   else
     echo "self-test: FAILED — surface extraction"; cat "$tmp/a.surface"; rc=1
@@ -551,7 +562,7 @@ YAML
 
   # A PLAIN ${ref} with no default is required too — ESPHome fails on an undefined substitution
   # with or without the guard. This is how device_name is declared.
-  if grep -qx 'required core mqtt_client_id' "$tmp/a.surface"; then
+  if grep -qx 'required modules/core.yaml mqtt_client_id' "$tmp/a.surface"; then
     echo "self-test: PASS — a plain, undefaulted reference is required (the device_name case)"
   else
     echo "self-test: FAILED — plain undefaulted reference not treated as required"; rc=1
@@ -565,7 +576,7 @@ substitutions:
 ota:
   url: "${ ota_http_server_test if ota_http_server_test is defined else 1/0 }"
 YAML
-  if extract_surface "$tmp/both" | grep -qx 'optional core ota_http_server_test = fallback'; then
+  if extract_surface "$tmp/both" | grep -qx 'optional modules/core.yaml ota_http_server_test = fallback'; then
     echo "self-test: PASS — guarded AND defaulted resolves to optional (ota_http_server_test case)"
   else
     echo "self-test: FAILED — guarded+defaulted misclassified"; extract_surface "$tmp/both"; rc=1
@@ -576,7 +587,7 @@ YAML
   mkdir -p "$tmp/fw/modules" "$tmp/fw/hardware"
   printf 'substitutions:\n  framework_variant: esp-idf\n' >"$tmp/fw/modules/core.yaml"
   printf 'esphome:\n  framework: ${framework_variant}\n'  >"$tmp/fw/hardware/board.yaml"
-  if extract_surface "$tmp/fw" | grep -qx 'optional core framework_variant = esp-idf'; then
+  if extract_surface "$tmp/fw" | grep -qx 'optional modules/core.yaml framework_variant = esp-idf'; then
     echo "self-test: PASS — a board reference defaulted in modules/ is not required (framework_variant case)"
   else
     echo "self-test: FAILED — cross-scope default resolution"; extract_surface "$tmp/fw"; rc=1
@@ -588,8 +599,8 @@ YAML
   printf 'substitutions:\n  slot_1_in1: "7"\n'  >"$tmp/a/hardware/hds_v1_0.yaml"
   printf 'substitutions:\n  slot_1_in1: "23"\n' >"$tmp/a/hardware/hds_v1_1.yaml"
   extract_surface "$tmp/a" >"$tmp/a2.surface"
-  if grep -qx 'optional hds_v1_0 slot_1_in1 = 7' "$tmp/a2.surface" \
-     && grep -qx 'optional hds_v1_1 slot_1_in1 = 23' "$tmp/a2.surface"; then
+  if grep -qx 'optional hardware/hds_v1_0.yaml slot_1_in1 = 7' "$tmp/a2.surface" \
+     && grep -qx 'optional hardware/hds_v1_1.yaml slot_1_in1 = 23' "$tmp/a2.surface"; then
     echo "self-test: PASS — per-board pin tables keep the same name under distinct scopes"
   else
     echo "self-test: FAILED — board scoping"; grep slot_1_in1 "$tmp/a2.surface"; rc=1
@@ -597,31 +608,31 @@ YAML
   _expect_cmp ok "$tmp/a2.surface" "$tmp/a2.surface" "a real two-board surface is stable against itself" || rc=1
 
   # --- classification -----------------------------------------------------------------------
-  printf 'optional core a = 1\nrequired core r\n'             >"$tmp/base"
-  printf 'optional core a = 1\nrequired core r\n'             >"$tmp/same"
+  printf 'optional modules/core.yaml a = 1\nrequired modules/core.yaml r\n'             >"$tmp/base"
+  printf 'optional modules/core.yaml a = 1\nrequired modules/core.yaml r\n'             >"$tmp/same"
   _expect_cmp ok "$tmp/base" "$tmp/same" "identical surfaces are non-breaking" || rc=1
 
-  printf 'optional core a = 1\n'                                  >"$tmp/reqgone"
+  printf 'optional modules/core.yaml a = 1\n'                                  >"$tmp/reqgone"
   _expect_cmp breaking "$tmp/base" "$tmp/reqgone" "removing a required substitution is breaking" || rc=1
 
-  printf 'optional core a = 1\noptional core r = x\n'         >"$tmp/relaxed"
+  printf 'optional modules/core.yaml a = 1\noptional modules/core.yaml r = x\n'         >"$tmp/relaxed"
   _expect_cmp ok "$tmp/base" "$tmp/relaxed" "a required substitution gaining a default is a relaxation" || rc=1
 
-  printf 'optional core a = 1\nrequired core r\nrequired core n\n' >"$tmp/newreq"
+  printf 'optional modules/core.yaml a = 1\nrequired modules/core.yaml r\nrequired modules/core.yaml n\n' >"$tmp/newreq"
   _expect_cmp breaking "$tmp/base" "$tmp/newreq" "adding a required substitution is breaking" || rc=1
 
-  printf 'required core a\nrequired core r\n'                 >"$tmp/tightened"
+  printf 'required modules/core.yaml a\nrequired modules/core.yaml r\n'                 >"$tmp/tightened"
   _expect_cmp breaking "$tmp/base" "$tmp/tightened" "an optional substitution losing its default is breaking" || rc=1
 
-  printf 'required core r\n'                                      >"$tmp/optgone"
+  printf 'required modules/core.yaml r\n'                                      >"$tmp/optgone"
   _expect_cmp breaking "$tmp/base" "$tmp/optgone" "removing an optional substitution is breaking" || rc=1
 
-  printf 'optional core a = 1\noptional core b = 2\nrequired core r\n' >"$tmp/added"
+  printf 'optional modules/core.yaml a = 1\noptional modules/core.yaml b = 2\nrequired modules/core.yaml r\n' >"$tmp/added"
   _expect_cmp ok "$tmp/base" "$tmp/added" "adding an optional substitution is non-breaking" || rc=1
 
-  printf 'optional core a = 9\nrequired core r\n'             >"$tmp/defchg"
+  printf 'optional modules/core.yaml a = 9\nrequired modules/core.yaml r\n'             >"$tmp/defchg"
   _expect_cmp ok "$tmp/base" "$tmp/defchg" "a changed default is non-breaking (reported, not gated)" || rc=1
-  if compare_surfaces "$tmp/base" "$tmp/defchg" | grep -q "REVIEW — default for 'a' (core) changed"; then
+  if compare_surfaces "$tmp/base" "$tmp/defchg" | grep -q "REVIEW — default for 'a' (modules/core.yaml) changed"; then
     echo "self-test: PASS — a changed default is reported for review"
   else
     echo "self-test: FAILED — changed default not reported"; rc=1
@@ -629,8 +640,8 @@ YAML
 
   # A pin dropped from ONE board is breaking for that board's consumers even though the name
   # survives on another board — this is what name-only keying would have missed.
-  printf 'optional hds_v1_0 p = 7\noptional hds_v1_1 p = 23\n'      >"$tmp/twoboards"
-  printf 'optional hds_v1_1 p = 23\n'                                >"$tmp/oneboard"
+  printf 'optional hardware/hds_v1_0.yaml p = 7\noptional hardware/hds_v1_1.yaml p = 23\n' >"$tmp/twoboards"
+  printf 'optional hardware/hds_v1_1.yaml p = 23\n'                                        >"$tmp/oneboard"
   _expect_cmp breaking "$tmp/twoboards" "$tmp/oneboard" "dropping a pin from one board is breaking for that board" || rc=1
 
   # A module that is NOT core gets its own scope, so a default in an unrelated module cannot mask
@@ -639,7 +650,7 @@ YAML
   mkdir -p "$tmp/mask/modules"
   printf 'substitutions:\n  shared_name: fromA\n' >"$tmp/mask/modules/a.yaml"
   printf 'x:\n  y: ${shared_name}\n'              >"$tmp/mask/modules/b.yaml"
-  if extract_surface "$tmp/mask" | grep -qx 'required b shared_name'; then
+  if extract_surface "$tmp/mask" | grep -qx 'required modules/b.yaml shared_name'; then
     echo "self-test: PASS — a default in an unrelated module does not mask a required reference"
   else
     echo "self-test: FAILED — cross-module masking"; extract_surface "$tmp/mask"; rc=1
@@ -661,6 +672,17 @@ YAML
     echo "self-test: FAILED — a reference inside a comment was counted"; rc=1
   else
     echo "self-test: PASS — a reference inside a full-line comment is not counted"
+  fi
+
+  # An `is defined` guard whose else-branch is not `1/0` supplies a fallback instead of failing, so
+  # the name is optional with a default this extractor cannot read. Guessing either way would be
+  # wrong; fail closed.
+  mkdir -p "$tmp/fallback/modules"
+  printf 'x:\n  y: "${ pw if pw is defined else \"public\" }"\n' >"$tmp/fallback/modules/core.yaml"
+  if extract_surface "$tmp/fallback" >/dev/null 2>&1; then
+    echo "self-test: FAILED — a non-1/0 guard fallback was silently classified"; rc=1
+  else
+    echo "self-test: PASS — a guard with a non-1/0 fallback fails closed"
   fi
 
   # Flow-style substitutions are not parsed, so they must be rejected rather than silently skipped.
