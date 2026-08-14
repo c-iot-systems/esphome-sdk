@@ -1,17 +1,29 @@
 name: release
 
-# Tags compile every validation fixture before release.
+# Compiles every validation fixture against a PUBLISHED tag. This is the belt-and-braces pass:
+# the gate that can still stop a bad release is release-gate.yml on main, which runs before the tag
+# exists. See AGENTS.md "How a release happens".
 on:
   push:
     tags:
       - "v*"
+  # release-please creates the tag with GITHUB_TOKEN, and a GITHUB_TOKEN event does not start a
+  # workflow run — so an automated release does NOT reach the `push: tags` trigger above. That is
+  # covered: release-gate.yml already compiled this exact tree on main. This input keeps the
+  # tag-time verification available on demand, and the `push` trigger still fires for a hand-cut tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to verify (e.g. v0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
   ESPHOME_VERSION: "2026.5.1"
-  SDK_REF: ${{ github.ref_name }}
+  SDK_REF: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   compile:
@@ -19,15 +31,22 @@ jobs:
     steps:
       - name: Checkout the tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
 
-      - name: Assert this is a tag ref
+      - name: Assert a released tag is what we are verifying
         run: |
           set -euo pipefail
-          if [ "${{ github.ref_type }}" != "tag" ]; then
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ github.ref_type }}" != "tag" ]; then
             echo "::error::release.yml must run on a tag, got ref_type='${{ github.ref_type }}'"
             exit 1
           fi
-          echo "Releasing tag: ${SDK_REF}"
+          if ! git rev-parse --verify --quiet "refs/tags/${SDK_REF}" >/dev/null; then
+            echo "::error::'${SDK_REF}' is not a tag in this repository"
+            exit 1
+          fi
+          echo "Verifying tag: ${SDK_REF}"
 
       - name: Automation list-syntax gate
         run: |
@@ -46,33 +65,8 @@ jobs:
 
       - name: Materialize the released tag into validate fixtures
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(tests/validate/*.yaml tests/validate/*.yml)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No validate fixtures yet — nothing to compile."
-            exit 0
-          fi
-          echo "Materializing SDK_REF=${SDK_REF} into ${#files[@]} fixture(s)"
-          for f in "${files[@]}"; do
-            sed -i "s/__SDK_REF__/${SDK_REF}/g" "$f"
-          done
-          # Scan fixtures only; README intentionally documents the placeholder.
-          if grep -l '__SDK_REF__' "${files[@]}" ; then
-            echo "::error::A fixture still contains __SDK_REF__ after materialization"
-            exit 1
-          fi
-          bad=0
-          for f in "${files[@]}"; do
-            while IFS= read -r val; do
-              if [ "$val" != "${SDK_REF}" ]; then
-                echo "::error::${f}: resolved ref '${val}' != released tag '${SDK_REF}'"
-                bad=1
-              fi
-            done < <(grep -oE '(^[[:space:]]*ref:|sdk_ref:)[[:space:]]*[^},[:space:]]+' "$f" \
-                       | sed -E 's/.*:[[:space:]]*//')
-          done
-          [ "$bad" -eq 0 ]
+          bash scripts/materialize-sdk-ref.sh --self-test
+          bash scripts/materialize-sdk-ref.sh "${SDK_REF}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
