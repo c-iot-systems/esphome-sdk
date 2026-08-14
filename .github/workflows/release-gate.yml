@@ -1,0 +1,184 @@
+name: release-gate
+
+# Compile, then release — in that order, in ONE workflow, so the second cannot happen without the
+# first.
+#
+# The ordering is the whole point. A tag here is permanent, public and pinned by devices in the
+# field, so the compile has to run while the version is still only a proposal. Two independent
+# workflows could not give that: release-please would create the tag on the release PR's merge
+# regardless of whether the compile of that same commit had passed, or even finished. As one
+# workflow with `needs: compile`, the release job is simply never reached unless the tree being
+# tagged compiled — including on the release PR's own merge commit, which is the commit that gets
+# tagged.
+#
+# This is why there is no `paths:` filter. A release PR only edits CHANGELOG.md and version.txt,
+# so a filter would skip the compile on exactly the push that publishes the tag.
+#
+# `push: branches: [main]` is the ONLY trigger. A workflow_dispatch could be launched from a feature
+# branch, where checkout would compile that branch while release-please — which targets the default
+# branch unless told otherwise — released main: a release of a tree that was never compiled.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ESPHOME_VERSION: "2026.5.1"
+
+# Deliberately NO `concurrency:` group. Within a group GitHub keeps only the newest PENDING run and
+# cancels older ones, even with cancel-in-progress: false — so a burst of pushes could cancel the
+# pending run for the release PR's merge commit and silently skip that release. Every push to main
+# gets its own run instead.
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # A cold PlatformIO toolchain download dominates this job; the key pins the ESPHome version
+      # so a bump re-primes the cache instead of reusing a stale toolchain.
+      - name: Cache the PlatformIO toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-esphome-${{ env.ESPHOME_VERSION }}
+          restore-keys: pio-${{ runner.os }}-esphome-
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
+      - name: Materialize the main SHA into validate fixtures
+        run: |
+          bash scripts/materialize-sdk-ref.sh --self-test
+          bash scripts/materialize-sdk-ref.sh "${{ github.sha }}"
+
+      # Parity only matches names against fixture FILENAMES. This actually runs them, proving each
+      # required substitution still fails validation when omitted — the difference between a
+      # credential being required and merely being listed as required.
+      - name: Negative-fixture gate (required substitutions must fail validation)
+        run: |
+          bash scripts/check-negative.sh --self-test
+          bash scripts/check-negative.sh
+
+      - name: esphome compile over validate fixtures
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/validate/*.yaml tests/validate/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No validate fixtures — nothing to compile."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "== esphome compile $f =="
+            esphome compile "$f"
+          done
+
+  # EVERY gate runs again here, not just the contract one. On a pull request they are enforced by
+  # validate.yml, but a direct push to main never has a pull request — and without this job a push
+  # that violates offline-survival, rollback timing, ref hygiene or automation syntax would still
+  # compile, still pass the contract check, and still be released.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Automation list-syntax gate
+        run: |
+          bash scripts/check-automation-syntax.sh --self-test
+          bash scripts/check-automation-syntax.sh
+
+      - name: SDK ref-consistency gate
+        run: |
+          bash scripts/check-sdk-ref.sh --self-test
+          bash scripts/check-sdk-ref.sh
+
+      - name: Offline-survival gate (reboot_timeout defaults must be 0s)
+        run: |
+          bash scripts/check-offline-survival.sh --self-test
+          bash scripts/check-offline-survival.sh
+
+      - name: OTA rollback-timing gate (safe_mode confirms after the watchdog)
+        run: |
+          bash scripts/check-rollback-timing.sh --self-test
+          bash scripts/check-rollback-timing.sh
+
+      # The contract gate here compares against the last PUBLISHED tag, reading the commits
+      # release-please will actually parse. The pull-request pass cannot stand in for it: it never
+      # sees a direct push, and it inspects commits a squash merge could have rewritten.
+      - name: Substitution-contract gate since the last release
+        run: |
+          bash scripts/check-contract-diff.sh --self-test
+          bash scripts/check-contract-diff.sh --since-release "${{ github.sha }}"
+
+      - name: Negative-harness parity
+        run: bash scripts/check-contract-diff.sh --negative-parity
+
+  release:
+    needs: [compile, gates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # release-please decides what to publish from the repository's state, not from this run's
+      # SHA, so two separate things have to be true before it is allowed to create a tag.
+      #
+      # (1) This run's commit is still main's head. With no concurrency group runs overlap, and a
+      #     slow run for an older commit must not act on a main that has moved past it.
+      # (2) This commit IS the merge of the release PR. Otherwise release-please would happily
+      #     publish a release PR that was merged earlier and never tagged — including one whose own
+      #     gates FAILED, which is exactly the commit that must never become a tag.
+      #
+      # When either is false the action still runs, with releases disabled, so the release PR keeps
+      # being maintained. Only the run that verified the precise commit being tagged may publish it.
+      - name: Decide whether this run may publish
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api "repos/${{ github.repository }}/commits/heads/main" --jq .sha)"
+          if [ "$head" != "${{ github.sha }}" ]; then
+            echo "main is at ${head}; this run verified ${{ github.sha }} — maintaining the release PR only."
+            echo "publish=false" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          # The merge commit of the most recently merged release-please PR, if any.
+          merged="$(gh api "repos/${{ github.repository }}/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=50" \
+                      --jq '[.[] | select(.head.ref | startswith("release-please--")) | select(.merged_at != null)][0].merge_commit_sha // ""')"
+          if [ -n "$merged" ] && [ "$merged" = "${{ github.sha }}" ]; then
+            echo "this commit is the release PR merge and passed its gates — publishing."
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "this commit is not a release PR merge (pending release merge: '${merged:-none}') — maintaining the release PR only."
+            echo "publish=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Maintain the release PR (no release)
+        if: steps.guard.outputs.publish != 'true'
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main
+          skip-github-release: true
+
+      - name: Publish the release for this verified commit
+        if: steps.guard.outputs.publish == 'true'
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main
