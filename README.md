@@ -90,6 +90,7 @@ the modules it imports.
 | `logger_level` | no | `NONE` _(safety)_ | logging is **off by default** — see below |
 | `logger_baud_rate` | no | `0` _(safety)_ | `0` **disables** the serial console (skips UART init) — see below |
 | `logger_hardware_uart` | no | `UART0` _(convenience)_ | logger UART; ESP32-S3 also accepts `USB_CDC` / `USB_SERIAL_JTAG` — see below |
+| `diagnostics_update_interval` | no | `60s` _(convenience)_ | *(`diagnostics.yaml`)* cadence for debug sensors a device attaches to the `debug` component — see below |
 
 Defaults are tagged **_(safety)_** or **_(convenience)_**. A **safety** default encodes a deliberate
 protective posture — offline survival (`*_reboot_timeout: 0s`), production-quiet logging
@@ -457,7 +458,13 @@ restructuring the others.
   required `ota_http_server`. `.test` is matched only as a whole dotted segment, because version
   names are sorted and `.test` is not necessarily the last suffix. The rollback watchdog armed on
   boot here is cancelled by `criotive_mqtt.yaml`'s `on_connect` once the broker is reached.
-- `diagnostics.yaml` — `debug` platform, device info, reset reason.
+- `diagnostics.yaml` — `debug` platform, device info, reset reason. Its `debug` component polls on
+  `diagnostics_update_interval` (default `60s`). The interval is neither `0s` nor `never` on purpose:
+  ESPHome coerces a 0 ms interval to **1 ms** (a 1 kHz wakeup on every device), while `never` would
+  silence any numeric debug sensors — free heap, loop time, cpu frequency — that a **consuming**
+  firmware attaches to this same component, since `DebugComponent::update()` is the only place those
+  publish. The module's own two text sensors are unaffected either way: they publish from
+  `dump_config()` at boot. A device with no debug sensors may set `never`.
 - `controls.yaml` — shutdown / restart / safe-mode / factory-reset buttons.
 - `location.yaml` — `google_location` and its `external_components`.
 
