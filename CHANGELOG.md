@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/c-iot-systems/esphome-sdk/compare/v0.2.0...v0.3.0) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **controls:** the four operator-facing controls publish under new MQTT object_ids. A consumer that matches them by name must read the `system_` prefix; devices must be reflashed for the new names to appear.
+
+### Features
+
+* **controls:** prefix the operator-facing device controls with system_ ([af62e28](https://github.com/c-iot-systems/esphome-sdk/commit/af62e2820a7034b213a57741038fad6bf0bda0b5))
+
 ## [0.2.0](https://github.com/c-iot-systems/esphome-sdk/compare/v0.1.2...v0.2.0) (2026-08-14)
 
 
