@@ -12,6 +12,17 @@
 # reboot / wipe, which `ack_button` cannot, and internal keeps them off the
 # broker entirely: no discovery, no command topic, nothing to acknowledge. The
 # visible button is the thing the platform talks to; this is its target.
+#
+# The visible names all begin with "System" on purpose. ESPHome derives an entity's
+# MQTT object_id by sanitizing its name, so these four publish as `system_shutdown`,
+# `system_restart`, `system_restart_safe_mode` and `system_factory_reset`.
+#
+# That `system_` prefix is the public marker for "device system control": an entity a
+# consumer should treat as maintenance plumbing rather than as something the end user
+# drives. A consumer can therefore recognize all of them with one prefix test instead of
+# a hardcoded list of names, and a new system control needs nothing on their side beyond
+# carrying the prefix. Renaming one changes its object_id, so treat these names as part
+# of the published surface.
 external_components:
   - source:
       type: git
@@ -25,25 +36,25 @@ button:
   # every one of these actions kills the MQTT client mid-flight. 500ms lets the
   # loop turn so the packet reaches the socket first.
   - platform: ack_button
-    name: "Shutdown"
+    name: "System Shutdown"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_shutdown
   - platform: ack_button
-    name: "Restart"
+    name: "System Restart"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_restart
   - platform: ack_button
-    name: "Restart (Safe Mode)"
+    name: "System Restart Safe Mode"
     on_press:
       - then:
           - delay: 500ms
           - button.press: button_safe_mode
   - platform: ack_button
-    name: "Factory Reset"
+    name: "System Factory Reset"
     on_press:
       - then:
           - delay: 500ms
