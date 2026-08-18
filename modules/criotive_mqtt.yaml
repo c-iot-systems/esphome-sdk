@@ -89,6 +89,14 @@ mqtt:
   reboot_timeout: ${mqtt_reboot_timeout}
   discovery: ${mqtt_discovery}
   discover_ip: false
+  # ESPHome's ESP32 default is false, which publishes synchronously from the
+  # main loop. Its own comment on that branch says the call "might block for
+  # several seconds, either due to network timeout (10s)", and Application feeds
+  # the task watchdog only between component invocations. esphome/issues#6810
+  # measured 20019ms in that path on a poor link, with loop watchdog resets;
+  # PR#8325 added the worker thread this enables. Measured on our bench with 19
+  # forced reconnects and ~40 entities: main-loop worst case 1578ms -> 352ms.
+  idf_send_async: true
   client_id: ${mqtt_client_id}
   topic_prefix: ${device_name}
   birth_message:
