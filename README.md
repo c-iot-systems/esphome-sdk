@@ -540,7 +540,10 @@ restructuring the others.
   client. Declares `ack_button`'s `external_components` itself, so importing this module is
   enough.
 - `location.yaml` — `google_location`, its `ack_button` Location Request, and the
-  `external_components` for both.
+  `external_components` for both. It retains ESPHome's full connection scan, accepts the platform's
+  `{"command":"fetch_location"}` system command on `command`, and publishes the result on
+  `<topic_prefix>/telemetry` as `location_parameters`. `location_system_command_topic` can override
+  the bare command topic for a broker without a listener mountpoint.
 
 ### Optional entity modules
 

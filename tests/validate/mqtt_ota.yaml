@@ -1,5 +1,6 @@
 # Fixture: the oracle for the cross-module rollback reference (criotive_mqtt on_connect ->
-# ota's script_rollback), the MQTT TLS trust anchor, and log_topic: null by default.
+# ota's script_rollback), the MQTT TLS trust anchor, log_topic: null by default, and location's
+# MQTT system-command subscription plus canonical telemetry publisher.
 substitutions:
   device_name: mqtt-ota-testdev
   firmware_version: "0.0.0-test"
@@ -29,4 +30,6 @@ packages:
       - path: modules/criotive_mqtt.yaml
         vars: {sdk_ref: __SDK_REF__}
       - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/location.yaml
         vars: {sdk_ref: __SDK_REF__}
