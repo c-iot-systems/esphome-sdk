@@ -5,7 +5,6 @@
 
 ### Bug Fixes
 
-* **mqtt:** publish from the worker thread instead of the main loop ([b7edd69](https://github.com/criotive/esphome-sdk/commit/b7edd6907b0118ef618bb7aeac521c282dbf1bbe))
 * **mqtt:** publish from the worker thread instead of the main loop ([0f34205](https://github.com/criotive/esphome-sdk/commit/0f342059304346ed945f5b2ee55a04a7b16f618d))
 * **tca8418:** stop each pin invalidating its own cache entry on read ([938120d](https://github.com/criotive/esphome-sdk/commit/938120d86c8ef37440f462a2952a74e1ba91ad2a))
 
