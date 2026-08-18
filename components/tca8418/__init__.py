@@ -26,10 +26,20 @@ TCA8418Component = tca8418_ns.class_("TCA8418Component", cg.Component, i2c.I2CDe
 TCA8418GPIOPin = tca8418_ns.class_("TCA8418GPIOPin", cg.GPIOPin)
 
 CONF_TCA8418 = "tca8418"
+CONF_POLL_INTERVAL = "poll_interval"
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.Required(CONF_ID): cv.declare_id(TCA8418Component),
+            # How often loop() may invalidate the read cache. Before this
+            # existed the expander was read every loop pass (~62Hz), which cost
+            # 8.7% of main-loop time on an idle bench and gave a network stall
+            # 62 chances a second to land on an I2C read. Rooms debounce these
+            # inputs by 120-150ms, so the default 50ms is still 6x faster than
+            # anything downstream can resolve.
+            cv.Optional(
+                CONF_POLL_INTERVAL, default="50ms"
+            ): cv.positive_time_period_milliseconds,
         },
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -42,6 +52,7 @@ async def to_code(config: dict[str, Any]) -> None:
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
+    cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
 
 
 def validate_mode(value: dict[str, Any]) -> dict[str, Any]:

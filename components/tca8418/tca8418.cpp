@@ -61,11 +61,31 @@ void TCA8418Component::setup() {
                           uint32_t(data[0]))) &
                        0x3FFFF;
 
+  // CachedGpioExpander defaults invalidate_on_read_ to true, which clears a
+  // pin's own cache bit every time it is read -- so that pin goes to the bus on
+  // every single digital_read(), and rate-limiting reset_pin_cache_() alone
+  // changes nothing. Turning it off makes the cache hold for the whole poll
+  // interval; digital_write_hw() still invalidates explicitly, so the manual
+  // matrix-scan idiom keeps working.
+  this->set_invalidate_on_read_(false);
+
   // Read initial input state
   this->read_gpio_();
 }
 
-void TCA8418Component::loop() { this->reset_pin_cache_(); }
+void TCA8418Component::loop() {
+  // Invalidating the cache every pass made the next digital_read() go to the
+  // bus, so the expander was read on every loop iteration -- about 62 times a
+  // second. Measured on an idle bench that was 8.7% of all main-loop time at
+  // the 50kHz default, and 62 chances a second for a read to be caught by a
+  // network stall. Nothing downstream can use that rate: rooms debounce these
+  // inputs by 120-150ms, so 20Hz is already 6x faster than the filters resolve.
+  const uint32_t now = millis();
+  if (now - this->last_poll_ms_ < this->poll_interval_ms_)
+    return;
+  this->last_poll_ms_ = now;
+  this->reset_pin_cache_();
+}
 
 void TCA8418Component::dump_config() {
   ESP_LOGCONFIG(TAG, "TCA8418:");

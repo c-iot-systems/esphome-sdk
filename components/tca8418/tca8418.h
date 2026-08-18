@@ -36,6 +36,11 @@ class TCA8418Component
 
   void pin_mode(uint8_t pin, gpio::Flags flags);
 
+  /// Minimum gap between hardware reads, in milliseconds. `loop()` invalidates
+  /// the read cache at most this often; every `digital_read()` in between is
+  /// served from the cached `input_mask_`.
+  void set_poll_interval(uint32_t interval_ms) { this->poll_interval_ms_ = interval_ms; }
+
  protected:
   bool digital_read_hw(uint8_t pin) override;
   bool digital_read_cache(uint8_t pin) override;
@@ -55,6 +60,10 @@ class TCA8418Component
   /// Pull-up resistor mask: 1 = enabled, 0 = disabled (TCA8418 register is
   /// inverted: 0=enabled, 1=disabled)
   uint32_t pullup_mask_{0x00};
+  /// See set_poll_interval(). 50ms = 20Hz, which is well inside the 120-150ms
+  /// debounce filters rooms put on expander inputs.
+  uint32_t poll_interval_ms_{50};
+  uint32_t last_poll_ms_{0};
 };
 
 class TCA8418GPIOPin : public GPIOPin {
