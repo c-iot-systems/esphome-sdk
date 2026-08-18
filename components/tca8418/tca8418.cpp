@@ -65,7 +65,19 @@ void TCA8418Component::setup() {
   this->read_gpio_();
 }
 
-void TCA8418Component::loop() { this->reset_pin_cache_(); }
+void TCA8418Component::loop() {
+  // Invalidating the cache every pass made the next digital_read() go to the
+  // bus, so the expander was read on every loop iteration -- about 62 times a
+  // second. Measured on an idle bench that was 8.7% of all main-loop time at
+  // the 50kHz default, and 62 chances a second for a read to be caught by a
+  // network stall. Nothing downstream can use that rate: rooms debounce these
+  // inputs by 120-150ms, so 20Hz is already 6x faster than the filters resolve.
+  const uint32_t now = millis();
+  if (now - this->last_poll_ms_ < this->poll_interval_ms_)
+    return;
+  this->last_poll_ms_ = now;
+  this->reset_pin_cache_();
+}
 
 void TCA8418Component::dump_config() {
   ESP_LOGCONFIG(TAG, "TCA8418:");
