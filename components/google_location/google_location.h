@@ -8,20 +8,45 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
+
+#ifdef USE_MQTT
+#include "esphome/components/mqtt/mqtt_client.h"
+#endif
 
 namespace esphome {
 namespace google_location {
 
+static const char *const TAG = "google_location";
+
 class GoogleLocation : public PollingComponent, public text_sensor::TextSensor {
  public:
+  void set_system_command_topic(const std::string &topic) { this->system_command_topic_ = topic; }
+
   float get_setup_priority() const override {
     return setup_priority::AFTER_WIFI;
   };
 
+  void setup() override {
+#ifdef USE_MQTT
+    mqtt::global_mqtt_client->subscribe_json(
+        this->system_command_topic_,
+        [this](const std::string &topic, JsonObject root) {
+          const char *command = root["command"];
+          if (command != nullptr && std::string(command) == "fetch_location") {
+            ESP_LOGD(TAG, "Received fetch_location on %s", topic.c_str());
+            this->update();
+          }
+        },
+        1);
+#endif
+  }
+
   void update() override {
-    this->publish_state(json::build_json([=](JsonObject root) {
-      // wifi::global_wifi_component->start_scanning();
-      root["considerIp"] = false;
+    const std::string payload = json::build_json([=](JsonObject root) {
+      JsonObject location = root["location_parameters"].to<JsonObject>();
+      location["considerIp"] = false;
+      JsonArray access_points = location["wifiAccessPoints"].to<JsonArray>();
       int i = 0;
       for (auto& scan : wifi::global_wifi_component->get_scan_result()) {
         if (i == 10) {  // That's enough....
@@ -33,14 +58,27 @@ class GoogleLocation : public PollingComponent, public text_sensor::TextSensor {
         char macStr[18] = {0};
         sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X", bssid[0], bssid[1],
                 bssid[2], bssid[3], bssid[4], bssid[5]);
-        const char* kWiFiAccessPoints = "wifiAccessPoints";
-        root[kWiFiAccessPoints][i]["macAddress"] = macStr;
-        root[kWiFiAccessPoints][i]["signalStrength"] = scan.get_rssi();
-        root[kWiFiAccessPoints][i]["channel"] = scan.get_channel();
+        JsonObject access_point = access_points.add<JsonObject>();
+        access_point["macAddress"] = macStr;
+        access_point["signalStrength"] = scan.get_rssi();
+        access_point["channel"] = scan.get_channel();
         i++;
       }
-    }));
+    });
+
+    this->publish_state(payload);
+
+#ifdef USE_MQTT
+    std::string telemetry_topic = mqtt::global_mqtt_client->get_topic_prefix();
+    if (!telemetry_topic.empty())
+      telemetry_topic += "/";
+    telemetry_topic += "telemetry";
+    mqtt::global_mqtt_client->publish(telemetry_topic, payload, 1, false);
+#endif
   }
+
+ protected:
+  std::string system_command_topic_{"command"};
 };
 
 }  // namespace google_location

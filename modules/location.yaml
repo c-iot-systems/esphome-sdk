@@ -1,3 +1,9 @@
+substitutions:
+  # On criotive's mounted listeners the device subscribes to the bare topic and
+  # the broker scopes it under the cloud id. Brokers without a mountpoint can
+  # override this with a device-prefixed topic for bench testing.
+  location_system_command_topic: command
+
 external_components:
   - source:
       type: git
@@ -9,12 +15,15 @@ text_sensor:
   - platform: google_location
     name: "Google location"
     id: id_google_location
+    internal: true
+    system_command_topic: ${location_system_command_topic}
     update_interval: never
 
 button:
   # ack_button, not template: a location request is asked for remotely, so the
-  # caller needs to know the device heard it. The scan itself answers later and
-  # out of band, on the text sensor above.
+  # caller needs to know the device heard it. The scan result is published as
+  # canonical location_parameters telemetry; this button remains an alternate
+  # trigger for Home Assistant clients while the platform uses fetch_location.
   - platform: ack_button
     name: "Location Request"
     id: button_google_location
