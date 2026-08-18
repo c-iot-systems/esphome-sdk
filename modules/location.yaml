@@ -1,7 +1,8 @@
 substitutions:
-  # On criotive's mounted listeners the device subscribes to the bare topic and
-  # the broker scopes it under the cloud id. Brokers without a mountpoint can
-  # override this with a device-prefixed topic for bench testing.
+  # Deprecated compatibility path for the legacy JSON fetch_location command.
+  # New callers must publish PRESS to the discovered Location Request ack_button
+  # command topic and observe PRESS on its state topic. On mounted listeners the
+  # broker scopes this bare legacy topic under the cloud id.
   location_system_command_topic: command
 
 external_components:
@@ -20,10 +21,10 @@ text_sensor:
     update_interval: never
 
 button:
-  # ack_button, not template: a location request is asked for remotely, so the
-  # caller needs to know the device heard it. The scan result is published as
-  # canonical location_parameters telemetry; this button remains an alternate
-  # trigger for Home Assistant clients while the platform uses fetch_location.
+  # Canonical remote trigger. ack_button publishes PRESS on its state topic
+  # before the scan starts, so the caller can confirm that the device received
+  # the command. The scan result follows as canonical location_parameters
+  # telemetry.
   - platform: ack_button
     name: "Location Request"
     id: button_google_location

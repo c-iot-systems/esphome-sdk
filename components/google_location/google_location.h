@@ -21,6 +21,10 @@ static const char *const TAG = "google_location";
 
 class GoogleLocation : public PollingComponent, public text_sensor::TextSensor {
  public:
+  /// Configure the legacy JSON system-command topic.
+  ///
+  /// Deprecated: remote callers should press the discovered Location Request
+  /// ack_button instead. Kept through the 0.3 line as a compatibility bridge.
   void set_system_command_topic(const std::string &topic) { this->system_command_topic_ = topic; }
 
   float get_setup_priority() const override {
@@ -29,12 +33,18 @@ class GoogleLocation : public PollingComponent, public text_sensor::TextSensor {
 
   void setup() override {
 #ifdef USE_MQTT
+    // Compatibility only. New callers use the Location Request ack_button,
+    // which acknowledges PRESS before its automation calls update(). Remove
+    // this subscription in the next breaking SDK release.
     mqtt::global_mqtt_client->subscribe_json(
         this->system_command_topic_,
         [this](const std::string &topic, JsonObject root) {
           const char *command = root["command"];
           if (command != nullptr && std::string(command) == "fetch_location") {
-            ESP_LOGD(TAG, "Received fetch_location on %s", topic.c_str());
+            ESP_LOGW(TAG,
+                     "Deprecated JSON fetch_location command received on '%s'; publish PRESS to the discovered "
+                     "Location Request ack_button command topic instead.",
+                     topic.c_str());
             this->update();
           }
         },

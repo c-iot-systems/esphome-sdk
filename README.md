@@ -540,10 +540,15 @@ restructuring the others.
   client. Declares `ack_button`'s `external_components` itself, so importing this module is
   enough.
 - `location.yaml` — `google_location`, its `ack_button` Location Request, and the
-  `external_components` for both. It retains ESPHome's full connection scan, accepts the platform's
-  `{"command":"fetch_location"}` system command on `command`, and publishes the result on
-  `<topic_prefix>/telemetry` as `location_parameters`. `location_system_command_topic` can override
-  the bare command topic for a broker without a listener mountpoint.
+  `external_components` for both. It retains ESPHome's full connection scan and publishes the
+  result on `<topic_prefix>/telemetry` as `location_parameters`. The canonical remote command is a
+  Home Assistant button press: publish `PRESS` to the Location Request discovery `command_topic`;
+  the button acknowledges with `PRESS` on its `state_topic` before starting the scan.
+
+  The JSON `{"command":"fetch_location"}` system command on `command` is deprecated. The 0.3 line
+  still accepts it for compatibility and logs a warning when it is used, but new callers must use
+  the acknowledged button path. `location_system_command_topic` only overrides that deprecated
+  compatibility topic and is scheduled for removal with the handler in the next breaking release.
 
 ### Optional entity modules
 
