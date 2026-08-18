@@ -61,6 +61,14 @@ void TCA8418Component::setup() {
                           uint32_t(data[0]))) &
                        0x3FFFF;
 
+  // CachedGpioExpander defaults invalidate_on_read_ to true, which clears a
+  // pin's own cache bit every time it is read -- so that pin goes to the bus on
+  // every single digital_read(), and rate-limiting reset_pin_cache_() alone
+  // changes nothing. Turning it off makes the cache hold for the whole poll
+  // interval; digital_write_hw() still invalidates explicitly, so the manual
+  // matrix-scan idiom keeps working.
+  this->set_invalidate_on_read_(false);
+
   // Read initial input state
   this->read_gpio_();
 }
