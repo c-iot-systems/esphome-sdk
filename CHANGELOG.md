@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/criotive/esphome-sdk/compare/v0.3.1...v0.3.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **location:** handle platform location requests ([e9707c4](https://github.com/criotive/esphome-sdk/commit/e9707c4a05b6a2cddb7002d955c1ae0548e12466))
+* **location:** handle platform location requests ([a678a9d](https://github.com/criotive/esphome-sdk/commit/a678a9dda2737efbe030a9387900ae91ab5220d9))
+
 ## [0.3.1](https://github.com/criotive/esphome-sdk/compare/v0.3.0...v0.3.1) (2026-08-18)
 
 
