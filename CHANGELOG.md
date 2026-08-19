@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/criotive/esphome-sdk/compare/v0.3.2...v0.3.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* **hardware:** give the task watchdog 60s so OTA can finalize ([04470f5](https://github.com/criotive/esphome-sdk/commit/04470f56ccc6ca5471b442e4be3245c81c86d94b))
+
 ## [0.3.2](https://github.com/criotive/esphome-sdk/compare/v0.3.1...v0.3.2) (2026-08-18)
 
 
