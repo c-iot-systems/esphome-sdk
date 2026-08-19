@@ -5,7 +5,6 @@
 
 ### Bug Fixes
 
-* **hardware:** give the task watchdog 60s so OTA can finalize ([1b088ae](https://github.com/criotive/esphome-sdk/commit/1b088ae8fb5f103434f89a24b0554037ca1a995d))
 * **hardware:** give the task watchdog 60s so OTA can finalize ([04470f5](https://github.com/criotive/esphome-sdk/commit/04470f56ccc6ca5471b442e4be3245c81c86d94b))
 
 ## [0.3.2](https://github.com/criotive/esphome-sdk/compare/v0.3.1...v0.3.2) (2026-08-18)
