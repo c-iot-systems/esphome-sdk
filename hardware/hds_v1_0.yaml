@@ -127,6 +127,19 @@ substitutions:
 
 esp32:
   board: pico32
+  # ESP-IDF ships CONFIG_ESP_TASK_WDT_TIMEOUT_S=5, and five seconds does not
+  # cover operations that legitimately block the loop. The one that breaks in
+  # practice is esp_ota_end(): it verifies the whole image in a single blocking
+  # call and, unlike the transfer loop around it, never feeds the watchdog. The
+  # device acknowledges RESPONSE_RECEIVE_OK and resets before it can send
+  # UPDATE_END_OK, so every upload dies on the same byte. Measured on toystory1
+  # on 2026-08-18: one success in roughly ten attempts with a 1.0 MB image, and
+  # safe mode does not help, because the loop is already empty there.
+  #
+  # 60s gives those operations room without disarming the protection -- a real
+  # loop hang still resets the board. The cost is that a genuine hang now takes
+  # 60s to recover instead of 5s.
+  watchdog_timeout: 60s
   variant: esp32
   framework:
     type: ${framework_variant}
