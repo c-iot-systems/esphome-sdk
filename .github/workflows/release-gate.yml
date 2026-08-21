@@ -127,6 +127,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # esphome is needed by the serial-api pin gate below, which runs `esphome config` over the
+      # negative fixtures to assert the pin contract fails with the RIGHT error text. The other gates
+      # in this job are pure bash and do not use it.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ESPHome ${{ env.ESPHOME_VERSION }}
+        run: pip install "esphome==${ESPHOME_VERSION}"
+
       - name: Automation list-syntax gate
         run: |
           bash scripts/check-automation-syntax.sh --self-test
@@ -162,6 +173,11 @@ jobs:
 
       - name: Negative-harness parity
         run: bash scripts/check-contract-diff.sh --negative-parity
+
+      - name: Serial API pin-contract gate (required pins + component pin-conflict rule, by error text)
+        run: |
+          bash scripts/check-serial-api-pins.sh --self-test
+          bash scripts/check-serial-api-pins.sh
 
   release:
     needs: [compile, negative, gates]

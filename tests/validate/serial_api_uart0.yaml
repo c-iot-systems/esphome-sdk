@@ -1,0 +1,38 @@
+# Fixture: a room that opts the serial API onto UART0 (GPIO1 TX / GPIO3 RX). This is the legal
+# UART0 path — SW1 is DISABLED so GPIO1 is free (hds_v1_1_sw1_enabled: "false"), the logger stays off
+# (core.yaml's logger_baud_rate "0", the default), and the board has no canbus: block. The serial
+# API's FINAL_VALIDATE pin-conflict rule therefore passes: nothing else holds GPIO1 or GPIO3.
+#
+# The flag is a quoted string on purpose — a consumer passing substitutions with ESPHome's `-s` always
+# yields strings, and the SW1 removal must survive "false" being a truthy string.
+substitutions:
+  device_name: serial-api-uart0-testdev
+  firmware_version: "0.0.0-test"
+  hds_v1_1_sw1_enabled: "false"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  criotive_env: prod
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+  serial_api_tx_pin: "1"   # GPIO1 — UART0 TX, freed because SW1 is disabled
+  serial_api_rx_pin: "3"   # GPIO3 — UART0 RX
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/serial_api.yaml
+        vars: {sdk_ref: __SDK_REF__}

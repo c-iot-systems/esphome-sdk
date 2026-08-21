@@ -1,0 +1,48 @@
+# Fixture: the CAN-room case — the serial API on a slot UART while CAN and SW1 keep their pins. This
+# is how 36 of 67 fleet devices must take the serial API: CAN owns GPIO2/GPIO3, SW1 owns GPIO1, so the
+# serial API moves to the room's slot pins. Here it takes slot 1's audio TX/RX pair (GPIO13/GPIO35),
+# referenced by NAME from hardware/hds_v1_1.yaml so a board-revision pin change follows automatically.
+#
+# SW1 is ENABLED (the flag's default), so controls.yaml is imported for SW1's on_click button targets,
+# and a canbus: block is wired to the board's ${can_tx}/${can_rx} (GPIO2/GPIO3 on v1.1). The serial
+# API's pins collide with neither, so FINAL_VALIDATE passes — and this fixture is the one that proves
+# the pin-conflict rule does not fire on a legitimate CAN room.
+substitutions:
+  device_name: serial-api-slot-testdev
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  criotive_env: prod
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+  serial_api_tx_pin: "${slot_1_audio_tx_dat}"  # GPIO13 — a slot pin, not UART0
+  serial_api_rx_pin: "${slot_1_audio_rx}"      # GPIO35 — input-only, valid as RX
+
+canbus:
+  - platform: esp32_can
+    tx_pin: ${can_tx}
+    rx_pin: ${can_rx}
+    can_id: 1
+    bit_rate: 50kbps
+
+packages:
+  criotive:
+    url: https://github.com/c-iot-systems/esphome-sdk
+    ref: __SDK_REF__
+    files:
+      - path: hardware/hds_v1_1.yaml
+      - path: modules/core.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/wifi.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/criotive_mqtt.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/ota.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/controls.yaml
+        vars: {sdk_ref: __SDK_REF__}
+      - path: modules/serial_api.yaml
+        vars: {sdk_ref: __SDK_REF__}

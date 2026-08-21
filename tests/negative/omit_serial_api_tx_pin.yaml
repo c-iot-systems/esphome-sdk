@@ -1,0 +1,34 @@
+# Negative: omitting serial_api_tx_pin must fail `esphome config`. The pin is a required substitution
+# of modules/serial_api.yaml (the `1/0` guard), so the union check-contract-diff.sh derives from
+# modules/ demands this omit_ fixture (negative parity), and check-serial-api-pins.sh asserts the
+# error actually NAMES serial_api_tx_pin — check-negative.sh only sees the non-zero exit, which a
+# git-fetch failure would also produce, proving nothing.
+#
+# Every OTHER required substitution is supplied — including the sibling serial_api_rx_pin — so the
+# only thing missing is serial_api_tx_pin and the failure is attributable to it alone. The `${sdk_ref}`
+# in serial_api.yaml's external_components is threaded as local-test but never fetched: the `1/0`
+# guard fires during substitution evaluation, before ESPHome resolves external_components.
+substitutions:
+  device_name: neg-device
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  criotive_env: prod
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+  serial_api_rx_pin: "3"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+packages:
+  core: !include { file: ../../modules/core.yaml, vars: {sdk_ref: local-test} }
+  wifi: !include { file: ../../modules/wifi.yaml, vars: {sdk_ref: local-test} }
+  mqtt: !include { file: ../../modules/criotive_mqtt.yaml, vars: {sdk_ref: local-test} }
+  ota: !include { file: ../../modules/ota.yaml, vars: {sdk_ref: local-test} }
+  serial: !include { file: ../../modules/serial_api.yaml, vars: {sdk_ref: local-test} }

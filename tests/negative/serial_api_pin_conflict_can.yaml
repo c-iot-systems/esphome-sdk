@@ -1,0 +1,41 @@
+# Negative: the serial API sharing a GPIO with the CAN transceiver must fail `esphome config`. A
+# component invariant enforced by serial_api's FINAL_VALIDATE_SCHEMA, so — like its SW1 sibling — it
+# is NOT named omit_* and the negative-parity gate ignores it.
+#
+# This is the hds_v1_1 case: the board's CAN RX is GPIO3 (hds_v1_0 uses GPIO15). The serial API takes
+# GPIO3 for RX, colliding with CAN. The rule compares the ACTUAL configured CAN rx_pin/tx_pin, never
+# the board name, so the SAME serial pins validate on a board whose CAN RX is GPIO15. 36 of 67 fleet
+# devices run CAN, and CAN always wins the pin: the serial API is what moves, to the room's slot UART.
+#
+# Component sourced LOCALLY, for the same reason as serial_api_pin_conflict_sw1.yaml. Deleting the CAN
+# branch of _validate_pin_conflicts makes this validate, and check-serial-api-pins.sh goes red.
+esphome:
+  name: ser-can-conflict
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+  baud_rate: 0
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+    components: [serial_api]
+
+uart:
+  - id: serial_api_uart
+    tx_pin: GPIO17
+    rx_pin: GPIO3
+    baud_rate: 115200
+
+serial_api:
+  uart_id: serial_api_uart
+
+canbus:
+  - platform: esp32_can
+    tx_pin: GPIO2   # hds_v1_1 CAN TX
+    rx_pin: GPIO3   # hds_v1_1 CAN RX — the pin the serial API also grabbed
+    can_id: 4
+    bit_rate: 125kbps

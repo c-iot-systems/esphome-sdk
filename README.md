@@ -88,6 +88,8 @@ the modules it imports.
 | `logger_baud_rate` | no | `0` _(safety)_ | `0` **disables** the serial console (skips UART init) — see below |
 | `logger_hardware_uart` | no | `UART0` _(convenience)_ | logger UART; `UART0` is the only console these boards can use — see below |
 | `diagnostics_update_interval` | no | `60s` _(convenience)_ | *(`diagnostics.yaml`)* cadence for debug sensors a device attaches to the `debug` component — see below |
+| `serial_api_tx_pin` | **yes** | — | *(`serial_api.yaml`)* UART TX pin for the serial API; **no default** — every room states it, see **Serial API** |
+| `serial_api_rx_pin` | **yes** | — | *(`serial_api.yaml`)* UART RX pin for the serial API; **no default** — every room states it, see **Serial API** |
 
 Defaults are tagged **_(safety)_** or **_(convenience)_**. A **safety** default encodes a deliberate
 protective posture — offline survival (`*_reboot_timeout: 0s`), production-quiet logging
@@ -486,8 +488,8 @@ of passing silently.
 - **`validate.yml`** — every pull request. Materializes the PR head SHA into each validate config's
   package `ref` and `vars.sdk_ref`, runs `esphome config` over `tests/validate/`, and runs the
   `check-automation-syntax.sh`, `check-button-platform.sh`, `check-sdk-ref.sh`,
-  `check-negative.sh`, `check-offline-survival.sh`, `check-rollback-timing.sh` and
-  `check-contract-diff.sh` gates. This validates the *revision under
+  `check-negative.sh`, `check-serial-api-pins.sh`, `check-offline-survival.sh`,
+  `check-rollback-timing.sh` and `check-contract-diff.sh` gates. This validates the *revision under
   test*, never a published tag.
 - **`release-gate.yml`** — every push to `main`. `compile` runs the real `esphome compile`, one
   parallel job per fixture (the list is discovered, not hardcoded, so a new fixture cannot escape
@@ -606,6 +608,47 @@ the entities themselves stay in the device's own config.
   `platform: shutdown` / `restart` / `safe_mode` / `factory_reset` genuinely perform the reboot and
   the wipe that `ack_button` cannot; `internal: true` is what makes them invisible to the platform,
   and therefore exempt from having to answer it.
+
+### Serial API — opt-in USB control
+
+- **`serial_api.yaml` — read and drive the device over a UART, no MQTT.** Imports the `serial_api`
+  component, binds it to a dedicated `uart:`, and threads `${firmware_version}` into the banner it
+  reports. An integrator on a USB cable can then enumerate the device's entities and read or actuate
+  them with a self-describing line protocol. **Import it when** a room is driven over a serial cable
+  rather than (or alongside) MQTT. The module is **opt-in**: no device in `hardware/` or `firmware/`
+  is changed until a room imports it, so adding it breaks nothing already deployed.
+
+  **The pins are a per-room decision, never a default.** `serial_api_tx_pin` and `serial_api_rx_pin`
+  are **required** substitutions with no fallback — every importing room states both. There is no
+  UART0 default on purpose: 36 of 67 fleet devices run CAN and cannot give UART0 to the serial API,
+  so a default would be wrong for most rooms. UART0 (GPIO1/GPIO3) is a legal *choice* when SW1 is
+  disabled and the room has no `canbus:` — the SDK already frees it (`logger_baud_rate: "0"`) — but a
+  choice, not a fallback. Omitting either pin fails `esphome config` naming the pin (the `1/0` guard).
+
+  **Two pin conflicts fail validation, in the component itself.** The check is a
+  `FINAL_VALIDATE_SCHEMA` in `components/serial_api/__init__.py`, so it fires at every consumer's
+  `esphome config` — including a production room in another repository that imports this module by
+  URL, where no SDK shell script ever runs. It compares the **actual configured pins**, never the
+  board name:
+  - **SW1 (GPIO1).** GPIO1 is UART0 TX and also the HDS board's SW1 button. Putting the serial API on
+    GPIO1 while SW1 is enabled is rejected, naming `hds_v1_1_sw1_enabled` — disable SW1 or move the
+    serial API to slot pins.
+  - **CAN.** CAN owns its transceiver pins; a serial pin that collides with a configured `canbus:`
+    `tx_pin`/`rx_pin` is rejected. CAN never moves — the serial API does. Because the rule reads the
+    configured CAN pins, the same serial pins that fail on a board whose CAN RX is GPIO3 validate on
+    one whose CAN RX is GPIO15.
+
+  **Wiring contract: TX, RX and GND only — never DTR or RTS.** Connect the adapter's TX to the
+  device RX, RX to the device TX, and a common ground. Do **not** wire DTR or RTS: a USB-serial
+  adapter drives RTS into the board's EN line, so a client that asserts it on connect or disconnect
+  resets the board (or holds it in reset). TX/RX/GND alone cannot.
+
+  **Release note — no existing config breaks.** `check-contract-diff.sh` reports the two new required
+  substitutions as BREAKING, because `modules/` is one shared namespace and a stored config that did
+  not supply them would now be rejected. No such config exists: nothing imported `serial_api.yaml`
+  before this release, so the marked-breaking bump reflects the gate's namespace model, not a real
+  migration. A room adopting the serial API states the pins the first time it imports the module,
+  which is a new opt-in, not a change to anything already running.
 
 ### Optional hardware modules
 

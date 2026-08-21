@@ -1,0 +1,28 @@
+# Negative: omitting serial_api_rx_pin must fail `esphome config`. Sibling of omit_serial_api_tx_pin;
+# see that file for why the omit_ set exists and why the error text (not just the exit code) is the
+# oracle. Here serial_api_tx_pin is supplied and serial_api_rx_pin is the single omitted input, so the
+# `1/0` guard on rx_pin is the one and only failure.
+substitutions:
+  device_name: neg-device
+  firmware_version: "0.0.0-test"
+  wifi_ssid: test-ssid
+  wifi_password: test-wifi-password
+  wifi_ap_password: test-ap-password
+  criotive_env: prod
+  mqtt_username: test-mqtt-user
+  mqtt_password: test-mqtt-password
+  ota_password: test-ota-password
+  ota_http_server: ota.test.invalid/blobs/
+  serial_api_tx_pin: "17"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+packages:
+  core: !include { file: ../../modules/core.yaml, vars: {sdk_ref: local-test} }
+  wifi: !include { file: ../../modules/wifi.yaml, vars: {sdk_ref: local-test} }
+  mqtt: !include { file: ../../modules/criotive_mqtt.yaml, vars: {sdk_ref: local-test} }
+  ota: !include { file: ../../modules/ota.yaml, vars: {sdk_ref: local-test} }
+  serial: !include { file: ../../modules/serial_api.yaml, vars: {sdk_ref: local-test} }

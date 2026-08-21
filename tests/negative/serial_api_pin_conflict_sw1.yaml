@@ -1,0 +1,40 @@
+# Negative: the serial API on UART0 (GPIO1 TX) while the SW1 button still holds GPIO1 must fail
+# `esphome config`. This is a component invariant enforced by serial_api's FINAL_VALIDATE_SCHEMA
+# (components/serial_api/__init__.py), not a substitution — so it is NOT named omit_*, and the
+# check-contract-diff.sh negative-parity gate ignores it. On the HDS board GPIO1 is SW1; a room frees
+# it with `hds_v1_1_sw1_enabled: false`. Here SW1 is represented by a gpio binary_sensor on GPIO1,
+# and the serial API takes GPIO1 for TX — the collision the rule forbids.
+#
+# The component is sourced through a LOCAL external_components path, not modules/serial_api.yaml: that
+# module fetches over git, and this config validates far enough to reach FINAL_VALIDATE, so a git
+# fetch would be attempted and would fail for the wrong reason — hiding a removed rule. Deleting the
+# SW1 branch of _validate_pin_conflicts makes this config validate, and check-serial-api-pins.sh (which
+# asserts the error names hds_v1_1_sw1_enabled) goes red.
+esphome:
+  name: ser-sw1-conflict
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+logger:
+  baud_rate: 0  # free UART0/GPIO1 as an SDK room does
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+    components: [serial_api]
+
+uart:
+  - id: serial_api_uart
+    tx_pin: GPIO1
+    rx_pin: GPIO3
+    baud_rate: 115200
+
+serial_api:
+  uart_id: serial_api_uart
+
+binary_sensor:
+  - platform: gpio
+    pin: 1
+    name: "SW1"
