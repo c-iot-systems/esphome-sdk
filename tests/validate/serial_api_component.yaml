@@ -1,0 +1,131 @@
+# Fixture: the serial_api component on a dedicated UART, composed the way a room opts in — the
+# component, its uart and an external_components ref, declared directly. It deliberately does NOT
+# import modules/serial_api.yaml: that module is AIOT-134 (SER-3) and does not exist yet, and the
+# component must compile without it.
+#
+# The component is fetched through external_components at the CI placeholder __SDK_REF__, which
+# every validate fixture must carry (check-sdk-ref.sh): CI materializes it to the revision under
+# test — the PR head SHA in validate.yml, the main SHA in release-gate.yml — so `esphome config` and
+# the real `esphome compile` build the tree being changed, never a published tag.
+#
+# esp-idf, not arduino: SDK rooms build under esp-idf (modules/core.yaml pins framework_variant),
+# so the fixture builds the component against the framework it actually ships on.
+#
+# The entity set covers all eight supported types (switch, binary_sensor, sensor, number, text,
+# text_sensor, select, button), an unsupported type (lock) that must still LIST `ro` and answer
+# ERR unsupported-type, reset_room (exposed on purpose), and denied names (system_/ota_/secret_ota/
+# internal) so the exposure rule is exercised in a real build.
+substitutions:
+  # check-sdk-ref.sh requires a validate fixture to thread the SDK revision through a sdk_ref
+  # substitution alongside the package/external ref, so both materialize to the same revision. This
+  # fixture takes the placeholder directly on the external_components ref below; sdk_ref carries the
+  # same value so the two can never disagree.
+  sdk_ref: __SDK_REF__
+
+esphome:
+  name: serial-api-testdev
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  # Free UART0/GPIO1 as an SDK room does; the protocol runs on its own uart below.
+  baud_rate: 0
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref: __SDK_REF__
+    components: [serial_api]
+
+uart:
+  - id: serial_api_uart
+    tx_pin: GPIO17
+    rx_pin: GPIO16
+    baud_rate: 115200
+
+serial_api:
+  uart_id: serial_api_uart
+  firmware_version: "1.0.0-test"  # what HELLO reports; a room threads ${firmware_version} here
+
+# --- Supported types -------------------------------------------------------
+switch:
+  - platform: template
+    name: "Relay"
+    optimistic: true
+  - platform: template
+    name: "Puzzle Teclado"
+    optimistic: true
+  - platform: template
+    name: "Reset Room"  # object_id reset_room — exposed on purpose (not system plumbing here)
+    optimistic: true
+  # Denied by the exposure rule — present so a build exercises the deny path.
+  - platform: template
+    name: "System Restart"  # object_id system_restart — denied (system_ prefix)
+    optimistic: true
+  - platform: template
+    name: "OTA HTTPS prod"  # object_id ota_https_prod — denied (ota_ prefix)
+    optimistic: true
+  - platform: template
+    id: hidden_relay
+    name: "Hidden Relay"
+    internal: true  # denied (internal)
+    optimistic: true
+
+binary_sensor:
+  - platform: template
+    name: "Door Sensor"
+    lambda: "return true;"
+
+sensor:
+  - platform: template
+    name: "Temperature"
+    lambda: "return 21.5;"
+    update_interval: never
+
+number:
+  - platform: template
+    name: "Volume"
+    min_value: 0
+    max_value: 100
+    step: 5
+    optimistic: true
+
+text:
+  - platform: template
+    name: "Label"
+    min_length: 0
+    max_length: 32
+    mode: text
+    optimistic: true
+
+text_sensor:
+  - platform: template
+    name: "Firmware Info"
+    lambda: 'return {"1.0.0"};'
+    update_interval: never
+
+select:
+  - platform: template
+    name: "Mode"
+    options:
+      - "Easy"
+      - "Hard Mode"  # an option containing a space — exercises the quoted option list
+    optimistic: true
+
+button:
+  - platform: template
+    name: "Reboot"
+    on_press:
+      - logger.log: "reboot pressed"
+
+# --- Unsupported type ------------------------------------------------------
+# A lock is a real entity_types.h type with no serial_api adapter: it must LIST `ro` with no domain
+# and answer ERR unsupported-type on GET. Present so the generic fallback compiles.
+lock:
+  - platform: template
+    name: "Door Lock"
+    optimistic: true
