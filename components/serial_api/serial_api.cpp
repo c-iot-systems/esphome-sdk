@@ -77,9 +77,7 @@ void SerialAPI::process_line_(const std::string &line) {
       this->send_hello_();
       break;
     case protocol::Verb::SET:
-      // AIOT-133 (SER-2) owns the write path. SER-1 lexes SET so the grammar is frozen for SER-2 to
-      // build on, but performs no write, so a lexically valid SET has no handler here yet.
-      this->emit_line_(protocol::format_err(protocol::err::PARSE, "set-unimplemented"));
+      this->handle_set_(cmd);
       break;
     case protocol::Verb::UNKNOWN:
       this->emit_line_(protocol::format_err(protocol::err::PARSE));
@@ -126,6 +124,32 @@ void SerialAPI::handle_get_(const protocol::Command &cmd) {
     for (auto *entity : App.get_##plural()) { \
       if (this->object_id_of_(entity) == req_object_id) { \
         this->respond_get_(entity, #singular); \
+        return; \
+      } \
+    } \
+  }
+#define ENTITY_CONTROLLER_TYPE_(type, singular, plural, count, upper, callback) \
+  ENTITY_TYPE_(type, singular, plural, count, upper)
+#include "esphome/core/entity_types.h"
+#undef ENTITY_TYPE_
+#undef ENTITY_CONTROLLER_TYPE_
+  // NOLINTEND(bugprone-macro-parentheses)
+  // No entity of that type carries that object_id — and an address whose type is not an entity type
+  // at all lands here too. Both are "no such entity", never a leak that another type exists.
+  this->emit_line_(protocol::format_err(protocol::err::UNKNOWN_ENTITY, cmd.type + "/" + cmd.object_id));
+}
+
+void SerialAPI::handle_set_(const protocol::Command &cmd) {
+  // Captured into locals because `type` is a parameter name of the X-macro below (see handle_get_).
+  const std::string &req_type = cmd.type;
+  const std::string &req_object_id = cmd.object_id;
+  const std::string &value = cmd.value;
+  // NOLINTBEGIN(bugprone-macro-parentheses)
+#define ENTITY_TYPE_(type, singular, plural, count, upper) \
+  if (req_type == #singular) { \
+    for (auto *entity : App.get_##plural()) { \
+      if (this->object_id_of_(entity) == req_object_id) { \
+        this->respond_set_(entity, #singular, value); \
         return; \
       } \
     } \

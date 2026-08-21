@@ -78,6 +78,30 @@ def _expose(object_id: str, internal: bool) -> str:
     return _run("expose", object_id, "1" if internal else "0").strip()
 
 
+def _setswitch(value: bytes) -> str:
+    return _run("setswitch", value.hex()).strip()
+
+
+def _setnumber(value: bytes, min_v: str, max_v: str) -> str:
+    return _run("setnumber", value.hex(), min_v, max_v).strip()
+
+
+def _settext(value: bytes, min_len: int, max_len: int) -> str:
+    return _run("settext", value.hex(), str(min_len), str(max_len)).strip()
+
+
+def _setselect(value: bytes, *options: bytes) -> str:
+    return _run("setselect", value.hex(), *[o.hex() for o in options]).strip()
+
+
+def _setbutton(value: bytes) -> str:
+    return _run("setbutton", value.hex()).strip()
+
+
+def _setresp(outcome: str, address: str) -> str:
+    return _run("setresp", outcome, address).strip()
+
+
 class LexerVerbTest(unittest.TestCase):
     def test_every_verb_is_recognised(self):
         cases = {
@@ -331,6 +355,130 @@ class WireLineTest(unittest.TestCase):
         self.assertEqual(_run("state", "switch/relay", b"ON".hex()).strip(), "STATE switch/relay ON")
         # A raw string value with a space survives verbatim.
         self.assertEqual(_run("state", "text/label", b"a b".hex()).strip(), "STATE text/label a b")
+
+
+class SwitchWriteTest(unittest.TestCase):
+    """SET switch/<id> ON|OFF; every other token is ERR bad-value (no write)."""
+
+    def test_on_and_off_are_accepted(self):
+        self.assertEqual(_setswitch(b"ON"), "on")
+        self.assertEqual(_setswitch(b"OFF"), "off")
+
+    def test_everything_else_is_bad_value(self):
+        # Case, numeric aliases, booleans, empty and a trailing/leading space are all rejected: the
+        # vocabulary is exactly the two tokens the read path emits.
+        for bad in (b"on", b"Off", b"1", b"0", b"true", b"", b"ON ", b" ON", b"ONOFF"):
+            self.assertEqual(_setswitch(bad), "bad", bad)
+
+
+class NumberWriteTest(unittest.TestCase):
+    """SET number/<id> <v>: finite decimal within [min,max] inclusive; anything else bad-value."""
+
+    def test_in_range_value_parses(self):
+        self.assertEqual(_setnumber(b"50", "0", "100"), "ok=50")
+        self.assertEqual(_setnumber(b"3.5", "0", "100"), "ok=3.5")
+
+    def test_inclusive_boundaries_are_accepted(self):
+        self.assertEqual(_setnumber(b"0", "0", "100"), "ok=0")
+        self.assertEqual(_setnumber(b"100", "0", "100"), "ok=100")
+
+    def test_out_of_range_is_bad_value(self):
+        # Just outside either bound, and far outside, on a symmetric and an asymmetric range.
+        self.assertEqual(_setnumber(b"-1", "0", "100"), "bad")
+        self.assertEqual(_setnumber(b"101", "0", "100"), "bad")
+        self.assertEqual(_setnumber(b"-11", "-10", "10"), "bad")
+        self.assertEqual(_setnumber(b"-10", "-10", "10"), "ok=-10")
+
+    def test_non_numeric_or_malformed_is_bad_value(self):
+        # Empty, alphabetic, trailing bytes the number did not consume, a leading space strtof would
+        # skip, and the non-finite tokens strtof accepts but a bounded actuator must not.
+        for bad in (b"", b"abc", b"5x", b"1 2", b" 5", b"NaN", b"nan", b"inf", b"-inf"):
+            self.assertEqual(_setnumber(bad, "-100", "100"), "bad", bad)
+
+    def test_hexadecimal_float_syntax_is_bad_value(self):
+        # strtof accepts C hex-float forms ("0x1p2" == 4, "0x10" == 16); the wire value is a decimal,
+        # so these are rejected even when the resulting number would fall inside the range.
+        for bad in (b"0x1p2", b"0x10", b"0X1P2", b"-0x1.8p1"):
+            self.assertEqual(_setnumber(bad, "-100", "100"), "bad", bad)
+
+    def test_scientific_notation_is_still_accepted(self):
+        # Rejecting hex must not catch decimal scientific notation, which never contains 'x'.
+        self.assertEqual(_setnumber(b"1e2", "0", "100"), "ok=100")
+        self.assertEqual(_setnumber(b"1.5E1", "0", "100"), "ok=15")
+
+
+class TextWriteTest(unittest.TestCase):
+    """SET text/<id> <v>: BYTE length within [min_length,max_length] inclusive, prevalidated."""
+
+    def test_length_within_bounds_is_accepted(self):
+        self.assertEqual(_settext(b"abc", 0, 5), "ok")
+
+    def test_empty_value_accepted_when_min_length_zero(self):
+        # The empty-value line form (`SET text/x`) reaches here as an empty string; min_length 0
+        # accepts it.
+        self.assertEqual(_settext(b"", 0, 5), "ok")
+
+    def test_empty_value_rejected_when_min_length_positive(self):
+        self.assertEqual(_settext(b"", 1, 5), "bad")
+
+    def test_inclusive_boundaries(self):
+        self.assertEqual(_settext(b"ab", 2, 5), "ok")  # exactly min
+        self.assertEqual(_settext(b"abcde", 2, 5), "ok")  # exactly max
+        self.assertEqual(_settext(b"a", 2, 5), "bad")  # one short of min
+        self.assertEqual(_settext(b"abcdef", 2, 5), "bad")  # one over max
+
+    def test_length_is_bytes_not_code_points(self):
+        # "café" is 4 code points but 5 UTF-8 bytes; the bound is bytes, matching TextCall::validate_.
+        cafe = "café".encode("utf-8")
+        self.assertEqual(len(cafe), 5)
+        self.assertEqual(_settext(cafe, 0, 5), "ok")
+        self.assertEqual(_settext(cafe, 0, 4), "bad")
+
+
+class SelectWriteTest(unittest.TestCase):
+    """SET select/<id> <v>: value must be one of the declared options exactly."""
+
+    OPTS = (b"Easy", b"Hard Mode")
+
+    def test_declared_option_is_accepted(self):
+        self.assertEqual(_setselect(b"Easy", *self.OPTS), "ok")
+
+    def test_option_containing_a_space_is_accepted(self):
+        self.assertEqual(_setselect(b"Hard Mode", *self.OPTS), "ok")
+
+    def test_option_outside_the_list_is_bad_value(self):
+        for bad in (b"hard mode", b"Medium", b"", b"Easy "):
+            self.assertEqual(_setselect(bad, *self.OPTS), "bad", bad)
+
+    def test_no_options_declared_rejects_everything(self):
+        self.assertEqual(_setselect(b"Easy"), "bad")
+
+
+class ButtonWriteTest(unittest.TestCase):
+    """SET button/<id> PRESS presses; every other token is bad-value."""
+
+    def test_press_is_accepted(self):
+        self.assertEqual(_setbutton(b"PRESS"), "ok")
+
+    def test_everything_else_is_bad_value(self):
+        for bad in (b"press", b"", b"PRESS ", b"PUSH", b"1", b"ON"):
+            self.assertEqual(_setbutton(bad), "bad", bad)
+
+
+class SetResponseTest(unittest.TestCase):
+    """Every SET outcome maps to its exact wire line — the response half of the write path, asserted
+    as bytes so a wrong error code for an outcome is caught without a device."""
+
+    def test_ok_is_bare(self):
+        # A performed write answers "OK" with no address echoed.
+        self.assertEqual(_setresp("ok", "switch/relay"), "OK")
+
+    def test_error_outcomes_carry_code_and_address(self):
+        self.assertEqual(_setresp("bad", "number/volume"), "ERR bad-value number/volume")
+        self.assertEqual(_setresp("readonly", "sensor/temperature"), "ERR read-only sensor/temperature")
+        self.assertEqual(
+            _setresp("unsupported", "lock/door"), "ERR unsupported-type lock/door"
+        )
 
 
 if __name__ == "__main__":

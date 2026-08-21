@@ -246,6 +246,80 @@ bool is_denied(const std::string &object_id, bool internal) {
   return false;
 }
 
+ValueCheck check_switch_value(const std::string &value, bool &on) {
+  if (value == "ON") {
+    on = true;
+    return ValueCheck::OK;
+  }
+  if (value == "OFF") {
+    on = false;
+    return ValueCheck::OK;
+  }
+  return ValueCheck::BAD_VALUE;
+}
+
+ValueCheck check_number_value(const std::string &value, float min_value, float max_value, float &out) {
+  if (value.empty())
+    return ValueCheck::BAD_VALUE;
+  // strtof skips leading whitespace and accepts "inf"/"nan"; the wire value is a bare decimal, so a
+  // leading space or a non-finite token is a bad value, not a number that happens to parse.
+  if (value.front() == ' ')
+    return ValueCheck::BAD_VALUE;
+  // strtof also accepts C hexadecimal-float syntax ("0x1p2", "0x10"), which the wire contract does
+  // not define — the value is a decimal (optionally scientific). Every hex form carries the 0x/0X
+  // marker, so rejecting 'x'/'X' rejects them all while leaving decimal and scientific notation
+  // untouched (neither ever contains 'x').
+  if (value.find('x') != std::string::npos || value.find('X') != std::string::npos)
+    return ValueCheck::BAD_VALUE;
+  const char *begin = value.c_str();
+  char *end = nullptr;
+  float parsed = std::strtof(begin, &end);
+  if (end != begin + value.size())  // bytes the number did not consume: "5x", "1 2", ""
+    return ValueCheck::BAD_VALUE;
+  if (!std::isfinite(parsed))
+    return ValueCheck::BAD_VALUE;
+  // Inclusive, mirroring NumberCall::perform which declines target < min or target > max. When a
+  // bound is NaN (an undeclared limit) both comparisons are false, so the value passes exactly as
+  // NumberCall would let it.
+  if (parsed < min_value || parsed > max_value)
+    return ValueCheck::BAD_VALUE;
+  out = parsed;
+  return ValueCheck::OK;
+}
+
+ValueCheck check_text_value(const std::string &value, int min_length, int max_length) {
+  int sz = static_cast<int>(value.size());
+  if (sz < min_length || sz > max_length)
+    return ValueCheck::BAD_VALUE;
+  return ValueCheck::OK;
+}
+
+ValueCheck check_select_value(const std::string &value, const std::vector<std::string> &options) {
+  for (const std::string &option : options) {
+    if (option == value)
+      return ValueCheck::OK;
+  }
+  return ValueCheck::BAD_VALUE;
+}
+
+ValueCheck check_button_value(const std::string &value) {
+  return value == "PRESS" ? ValueCheck::OK : ValueCheck::BAD_VALUE;
+}
+
+std::string format_set_response(SetOutcome outcome, const std::string &address) {
+  switch (outcome) {
+    case SetOutcome::OK:
+      return "OK";
+    case SetOutcome::BAD_VALUE:
+      return format_err(err::BAD_VALUE, address);
+    case SetOutcome::READ_ONLY:
+      return format_err(err::READ_ONLY, address);
+    case SetOutcome::UNSUPPORTED:
+      return format_err(err::UNSUPPORTED_TYPE, address);
+  }
+  return format_err(err::BAD_VALUE, address);  // unreachable; the enum is exhaustive
+}
+
 std::string format_err(const char *code, const std::string &detail) {
   std::string out = "ERR ";
   out += code;
