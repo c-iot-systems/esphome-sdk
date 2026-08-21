@@ -93,3 +93,21 @@ jobs:
         run: |
           bash scripts/check-negative.sh --self-test
           bash scripts/check-negative.sh
+
+  # Host unit tests for firmware logic that needs no device — currently the Serial API wire protocol
+  # (components/serial_api/serial_api_protocol.*), compiled with g++ (preinstalled on the runner)
+  # and driven from Python. Separate from the ESPHome gates above because it neither needs ESPHome
+  # nor the SDK ref, and a compile failure here should read as "the protocol logic broke", not "a
+  # fixture failed to validate".
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Serial API protocol unit tests
+        run: python -m unittest discover -s tests/unit -p 'test_*.py' -v
