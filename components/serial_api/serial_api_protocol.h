@@ -94,6 +94,37 @@ bool is_valid_utf8(const std::string &s);
 // `system_` (case-insensitive) or `ota_`, or is exactly `secret_ota`. reset_room is NOT denied.
 bool is_denied(const std::string &object_id, bool internal);
 
+// Per-type SET value validators (the write path, AIOT-131 SER-2). These are pure — no ESPHome type
+// enters this translation unit — so the host unit tests drive every ERR bad-value boundary without a
+// device. The component's write adapters call the matching validator BEFORE touching the entity's
+// call API: ESPHome's number/text/select call APIs silently DECLINE a value outside their bounds
+// (verified against ESPHome 2026.5.1: NumberCall::perform, TextCall::validate_, SelectCall::perform
+// warn and return without writing), so validating here is what turns that silent no-op into an
+// explicit ERR bad-value and guarantees no write happens on a rejected value.
+enum class ValueCheck : uint8_t { OK, BAD_VALUE };
+
+// switch: the value is exactly "ON" or "OFF" (the same vocabulary the read path emits). On OK, `on`
+// is the target state.
+ValueCheck check_switch_value(const std::string &value, bool &on);
+
+// number: the value is a finite decimal within [min_value, max_value] INCLUSIVE — the bounds and the
+// inclusive comparison mirror NumberCall::perform, which declines a value strictly below min or
+// above max. On OK, `out` is the parsed value. A non-numeric token, trailing bytes, a leading space,
+// NaN or an infinity are rejected.
+ValueCheck check_number_value(const std::string &value, float min_value, float max_value, float &out);
+
+// text: the value's BYTE length is within [min_length, max_length] INCLUSIVE — byte length and the
+// inclusive bounds are exactly what TextCall::validate_() checks (`int sz = value.size()`, declines
+// sz > max or sz < min). An empty value passes when min_length is 0.
+ValueCheck check_text_value(const std::string &value, int min_length, int max_length);
+
+// select: the value equals one of `options` exactly (byte-for-byte), the same membership test
+// Select::index_of performs.
+ValueCheck check_select_value(const std::string &value, const std::vector<std::string> &options);
+
+// button: the value is exactly "PRESS".
+ValueCheck check_button_value(const std::string &value);
+
 // Response-line formatters. Each returns the exact wire line WITHOUT the trailing '\n'; the caller
 // terminates. They take primitives so the host tests can assert byte-exact output.
 std::string format_err(const char *code, const std::string &detail);

@@ -17,6 +17,11 @@
 //   hello      <hexname> <hexver>     print format_hello
 //   ent        <type> <oid> <rw|ro> <hexname> [domain...]   print format_ent
 //   state      <address> <hexval>     print format_state
+//   setswitch  <hexval>               print "on" | "off" | "bad"
+//   setnumber  <hexval> <min> <max>   print "ok=<value>" | "bad"
+//   settext    <hexval> <min> <max>   print "ok" | "bad"
+//   setselect  <hexval> <hexopt>...   print "ok" | "bad"
+//   setbutton  <hexval>               print "ok" | "bad"
 
 #include <cstdio>
 #include <cstdlib>
@@ -168,6 +173,42 @@ int main(int argc, char **argv) {
     // statef <float> <has_state 0|1> — exercises format_state_float directly.
     bool has_state = std::string(argv[3]) == "1";
     std::printf("%s\n", proto::format_state_float(std::strtof(argv[2], nullptr), has_state).c_str());
+    return 0;
+  }
+  if (mode == "setswitch") {
+    bool on = false;
+    if (proto::check_switch_value(from_hex(argv[2]), on) != proto::ValueCheck::OK)
+      std::printf("bad\n");
+    else
+      std::printf("%s\n", on ? "on" : "off");
+    return 0;
+  }
+  if (mode == "setnumber") {
+    float out = 0.0f;
+    if (proto::check_number_value(from_hex(argv[2]), std::strtof(argv[3], nullptr),
+                                  std::strtof(argv[4], nullptr), out) != proto::ValueCheck::OK)
+      std::printf("bad\n");
+    else
+      std::printf("ok=%s\n", proto::format_state_float(out, true).c_str());
+    return 0;
+  }
+  if (mode == "settext") {
+    bool ok = proto::check_text_value(from_hex(argv[2]), std::stoi(argv[3]), std::stoi(argv[4])) ==
+              proto::ValueCheck::OK;
+    std::printf("%s\n", ok ? "ok" : "bad");
+    return 0;
+  }
+  if (mode == "setselect") {
+    std::vector<std::string> options;
+    for (int i = 3; i < argc; i++)
+      options.push_back(from_hex(argv[i]));
+    bool ok = proto::check_select_value(from_hex(argv[2]), options) == proto::ValueCheck::OK;
+    std::printf("%s\n", ok ? "ok" : "bad");
+    return 0;
+  }
+  if (mode == "setbutton") {
+    bool ok = proto::check_button_value(from_hex(argv[2])) == proto::ValueCheck::OK;
+    std::printf("%s\n", ok ? "ok" : "bad");
     return 0;
   }
 
