@@ -162,80 +162,73 @@ inline std::string serial_domain(select::Select *e) {
 // write that never happened.
 // ---------------------------------------------------------------------------
 
-enum class WriteResult : uint8_t {
-  OK,           // the write was performed
-  BAD_VALUE,    // the value is not valid for this entity — no write
-  READ_ONLY,    // a supported but read-only type (sensor, binary_sensor, text_sensor)
-  UNSUPPORTED,  // not one of the eight supported types
-};
-
-template<class T> inline WriteResult serial_write(T * /*e*/, const std::string & /*value*/) {
-  return WriteResult::UNSUPPORTED;
+template<class T> inline protocol::SetOutcome serial_write(T * /*e*/, const std::string & /*value*/) {
+  return protocol::SetOutcome::UNSUPPORTED;
 }
 
 #ifdef USE_SWITCH
-inline WriteResult serial_write(switch_::Switch *e, const std::string &value) {
+inline protocol::SetOutcome serial_write(switch_::Switch *e, const std::string &value) {
   bool on;
   if (protocol::check_switch_value(value, on) != protocol::ValueCheck::OK)
-    return WriteResult::BAD_VALUE;
+    return protocol::SetOutcome::BAD_VALUE;
   if (on)
     e->turn_on();
   else
     e->turn_off();
-  return WriteResult::OK;
+  return protocol::SetOutcome::OK;
 }
 #endif
 #ifdef USE_NUMBER
-inline WriteResult serial_write(number::Number *e, const std::string &value) {
+inline protocol::SetOutcome serial_write(number::Number *e, const std::string &value) {
   float parsed;
   if (protocol::check_number_value(value, e->traits.get_min_value(), e->traits.get_max_value(),
                                    parsed) != protocol::ValueCheck::OK)
-    return WriteResult::BAD_VALUE;
+    return protocol::SetOutcome::BAD_VALUE;
   e->make_call().set_value(parsed).perform();
-  return WriteResult::OK;
+  return protocol::SetOutcome::OK;
 }
 #endif
 #ifdef USE_TEXT
-inline WriteResult serial_write(text::Text *e, const std::string &value) {
+inline protocol::SetOutcome serial_write(text::Text *e, const std::string &value) {
   if (protocol::check_text_value(value, e->traits.get_min_length(), e->traits.get_max_length()) !=
       protocol::ValueCheck::OK)
-    return WriteResult::BAD_VALUE;
+    return protocol::SetOutcome::BAD_VALUE;
   e->make_call().set_value(value).perform();
-  return WriteResult::OK;
+  return protocol::SetOutcome::OK;
 }
 #endif
 #ifdef USE_SELECT
-inline WriteResult serial_write(select::Select *e, const std::string &value) {
+inline protocol::SetOutcome serial_write(select::Select *e, const std::string &value) {
   std::vector<std::string> options;
   for (const char *option : e->traits.get_options())
     options.emplace_back(option);
   if (protocol::check_select_value(value, options) != protocol::ValueCheck::OK)
-    return WriteResult::BAD_VALUE;
+    return protocol::SetOutcome::BAD_VALUE;
   e->make_call().set_option(value).perform();
-  return WriteResult::OK;
+  return protocol::SetOutcome::OK;
 }
 #endif
 #ifdef USE_BUTTON
-inline WriteResult serial_write(button::Button *e, const std::string &value) {
+inline protocol::SetOutcome serial_write(button::Button *e, const std::string &value) {
   if (protocol::check_button_value(value) != protocol::ValueCheck::OK)
-    return WriteResult::BAD_VALUE;
+    return protocol::SetOutcome::BAD_VALUE;
   e->press();
-  return WriteResult::OK;
+  return protocol::SetOutcome::OK;
 }
 #endif
 #ifdef USE_SENSOR
-inline WriteResult serial_write(sensor::Sensor * /*e*/, const std::string & /*value*/) {
-  return WriteResult::READ_ONLY;
+inline protocol::SetOutcome serial_write(sensor::Sensor * /*e*/, const std::string & /*value*/) {
+  return protocol::SetOutcome::READ_ONLY;
 }
 #endif
 #ifdef USE_BINARY_SENSOR
-inline WriteResult serial_write(binary_sensor::BinarySensor * /*e*/, const std::string & /*value*/) {
-  return WriteResult::READ_ONLY;
+inline protocol::SetOutcome serial_write(binary_sensor::BinarySensor * /*e*/, const std::string & /*value*/) {
+  return protocol::SetOutcome::READ_ONLY;
 }
 #endif
 #ifdef USE_TEXT_SENSOR
-inline WriteResult serial_write(text_sensor::TextSensor * /*e*/, const std::string & /*value*/) {
-  return WriteResult::READ_ONLY;
+inline protocol::SetOutcome serial_write(text_sensor::TextSensor * /*e*/, const std::string & /*value*/) {
+  return protocol::SetOutcome::READ_ONLY;
 }
 #endif
 
@@ -334,20 +327,7 @@ class SerialAPI : public uart::UARTDevice, public Component, public Controller {
       return;
     }
     std::string address = std::string(type_name) + "/" + object_id;
-    switch (serial_write(entity, value)) {
-      case WriteResult::OK:
-        this->emit_line_("OK");
-        break;
-      case WriteResult::BAD_VALUE:
-        this->emit_line_(protocol::format_err(protocol::err::BAD_VALUE, address));
-        break;
-      case WriteResult::READ_ONLY:
-        this->emit_line_(protocol::format_err(protocol::err::READ_ONLY, address));
-        break;
-      case WriteResult::UNSUPPORTED:
-        this->emit_line_(protocol::format_err(protocol::err::UNSUPPORTED_TYPE, address));
-        break;
-    }
+    this->emit_line_(protocol::format_set_response(serial_write(entity, value), address));
   }
 
   template<class T> void on_entity_update_(T *entity, const char *type_name) {

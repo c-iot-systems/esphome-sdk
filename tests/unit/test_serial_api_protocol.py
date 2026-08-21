@@ -98,6 +98,10 @@ def _setbutton(value: bytes) -> str:
     return _run("setbutton", value.hex()).strip()
 
 
+def _setresp(outcome: str, address: str) -> str:
+    return _run("setresp", outcome, address).strip()
+
+
 class LexerVerbTest(unittest.TestCase):
     def test_every_verb_is_recognised(self):
         cases = {
@@ -391,6 +395,17 @@ class NumberWriteTest(unittest.TestCase):
         for bad in (b"", b"abc", b"5x", b"1 2", b" 5", b"NaN", b"nan", b"inf", b"-inf"):
             self.assertEqual(_setnumber(bad, "-100", "100"), "bad", bad)
 
+    def test_hexadecimal_float_syntax_is_bad_value(self):
+        # strtof accepts C hex-float forms ("0x1p2" == 4, "0x10" == 16); the wire value is a decimal,
+        # so these are rejected even when the resulting number would fall inside the range.
+        for bad in (b"0x1p2", b"0x10", b"0X1P2", b"-0x1.8p1"):
+            self.assertEqual(_setnumber(bad, "-100", "100"), "bad", bad)
+
+    def test_scientific_notation_is_still_accepted(self):
+        # Rejecting hex must not catch decimal scientific notation, which never contains 'x'.
+        self.assertEqual(_setnumber(b"1e2", "0", "100"), "ok=100")
+        self.assertEqual(_setnumber(b"1.5E1", "0", "100"), "ok=15")
+
 
 class TextWriteTest(unittest.TestCase):
     """SET text/<id> <v>: BYTE length within [min_length,max_length] inclusive, prevalidated."""
@@ -448,6 +463,22 @@ class ButtonWriteTest(unittest.TestCase):
     def test_everything_else_is_bad_value(self):
         for bad in (b"press", b"", b"PRESS ", b"PUSH", b"1", b"ON"):
             self.assertEqual(_setbutton(bad), "bad", bad)
+
+
+class SetResponseTest(unittest.TestCase):
+    """Every SET outcome maps to its exact wire line — the response half of the write path, asserted
+    as bytes so a wrong error code for an outcome is caught without a device."""
+
+    def test_ok_is_bare(self):
+        # A performed write answers "OK" with no address echoed.
+        self.assertEqual(_setresp("ok", "switch/relay"), "OK")
+
+    def test_error_outcomes_carry_code_and_address(self):
+        self.assertEqual(_setresp("bad", "number/volume"), "ERR bad-value number/volume")
+        self.assertEqual(_setresp("readonly", "sensor/temperature"), "ERR read-only sensor/temperature")
+        self.assertEqual(
+            _setresp("unsupported", "lock/door"), "ERR unsupported-type lock/door"
+        )
 
 
 if __name__ == "__main__":

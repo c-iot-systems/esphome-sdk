@@ -125,6 +125,21 @@ ValueCheck check_select_value(const std::string &value, const std::vector<std::s
 // button: the value is exactly "PRESS".
 ValueCheck check_button_value(const std::string &value);
 
+// The outcome of a SET once the target entity has been resolved and (for a writable type) its value
+// validated. The component's write adapter (serial_write) returns one of these and the dispatcher
+// renders it with format_set_response — both the outcome set and its wire mapping live here, in the
+// pure layer, so every response line a SET can produce is asserted by the host unit tests.
+enum class SetOutcome : uint8_t {
+  OK,           // the write was performed
+  BAD_VALUE,    // the value is not valid for this entity — no write
+  READ_ONLY,    // a supported but read-only type (sensor, binary_sensor, text_sensor)
+  UNSUPPORTED,  // not one of the eight supported types
+};
+
+// Render the wire line for a SET outcome: "OK" for a performed write, otherwise `ERR <code>
+// <address>` with the code the outcome maps to. Returns the line WITHOUT the trailing '\n'.
+std::string format_set_response(SetOutcome outcome, const std::string &address);
+
 // Response-line formatters. Each returns the exact wire line WITHOUT the trailing '\n'; the caller
 // terminates. They take primitives so the host tests can assert byte-exact output.
 std::string format_err(const char *code, const std::string &detail);

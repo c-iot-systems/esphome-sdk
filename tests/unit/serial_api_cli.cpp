@@ -22,6 +22,7 @@
 //   settext    <hexval> <min> <max>   print "ok" | "bad"
 //   setselect  <hexval> <hexopt>...   print "ok" | "bad"
 //   setbutton  <hexval>               print "ok" | "bad"
+//   setresp    <outcome> <address>    print format_set_response (outcome: ok|bad|readonly|unsupported)
 
 #include <cstdio>
 #include <cstdlib>
@@ -209,6 +210,18 @@ int main(int argc, char **argv) {
   if (mode == "setbutton") {
     bool ok = proto::check_button_value(from_hex(argv[2])) == proto::ValueCheck::OK;
     std::printf("%s\n", ok ? "ok" : "bad");
+    return 0;
+  }
+  if (mode == "setresp") {
+    std::string which = argv[2];
+    proto::SetOutcome outcome = proto::SetOutcome::OK;
+    if (which == "bad")
+      outcome = proto::SetOutcome::BAD_VALUE;
+    else if (which == "readonly")
+      outcome = proto::SetOutcome::READ_ONLY;
+    else if (which == "unsupported")
+      outcome = proto::SetOutcome::UNSUPPORTED;
+    std::printf("%s\n", proto::format_set_response(outcome, argv[3]).c_str());
     return 0;
   }
 

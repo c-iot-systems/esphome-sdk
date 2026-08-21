@@ -265,6 +265,12 @@ ValueCheck check_number_value(const std::string &value, float min_value, float m
   // leading space or a non-finite token is a bad value, not a number that happens to parse.
   if (value.front() == ' ')
     return ValueCheck::BAD_VALUE;
+  // strtof also accepts C hexadecimal-float syntax ("0x1p2", "0x10"), which the wire contract does
+  // not define — the value is a decimal (optionally scientific). Every hex form carries the 0x/0X
+  // marker, so rejecting 'x'/'X' rejects them all while leaving decimal and scientific notation
+  // untouched (neither ever contains 'x').
+  if (value.find('x') != std::string::npos || value.find('X') != std::string::npos)
+    return ValueCheck::BAD_VALUE;
   const char *begin = value.c_str();
   char *end = nullptr;
   float parsed = std::strtof(begin, &end);
@@ -298,6 +304,20 @@ ValueCheck check_select_value(const std::string &value, const std::vector<std::s
 
 ValueCheck check_button_value(const std::string &value) {
   return value == "PRESS" ? ValueCheck::OK : ValueCheck::BAD_VALUE;
+}
+
+std::string format_set_response(SetOutcome outcome, const std::string &address) {
+  switch (outcome) {
+    case SetOutcome::OK:
+      return "OK";
+    case SetOutcome::BAD_VALUE:
+      return format_err(err::BAD_VALUE, address);
+    case SetOutcome::READ_ONLY:
+      return format_err(err::READ_ONLY, address);
+    case SetOutcome::UNSUPPORTED:
+      return format_err(err::UNSUPPORTED_TYPE, address);
+  }
+  return format_err(err::BAD_VALUE, address);  // unreachable; the enum is exhaustive
 }
 
 std::string format_err(const char *code, const std::string &detail) {
