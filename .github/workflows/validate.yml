@@ -94,6 +94,11 @@ jobs:
           bash scripts/check-negative.sh --self-test
           bash scripts/check-negative.sh
 
+      - name: Serial API pin-contract gate (required pins + component pin-conflict rule, by error text)
+        run: |
+          bash scripts/check-serial-api-pins.sh --self-test
+          bash scripts/check-serial-api-pins.sh
+
   # Host unit tests for firmware logic that needs no device — currently the Serial API wire protocol
   # (components/serial_api/serial_api_protocol.*), compiled with g++ (preinstalled on the runner)
   # and driven from Python. Separate from the ESPHome gates above because it neither needs ESPHome

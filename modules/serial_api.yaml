@@ -1,0 +1,24 @@
+# Serial API module — opt-in USB TX/RX control of an SDK device (AIOT-131 / SER-3).
+#
+# A room that imports this gets the serial_api component fetched at the SDK revision and bound to a
+# dedicated UART. The pins are a per-room decision, never a default: 36 of 67 fleet devices run CAN
+# and cannot take UART0, so every room states serial_api_tx_pin and serial_api_rx_pin. The 1/0 guard
+# makes an omitted pin fail validation loudly (check-contract-diff.sh derives the required set from
+# these; check-negative.sh proves the failure) rather than silently picking a wrong pin.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/c-iot-systems/esphome-sdk
+      ref: ${sdk_ref}
+    components: [serial_api]
+
+uart:
+  - id: serial_api_uart
+    tx_pin: "${ serial_api_tx_pin if serial_api_tx_pin is defined else 1/0 }"
+    rx_pin: "${ serial_api_rx_pin if serial_api_rx_pin is defined else 1/0 }"
+    baud_rate: 115200
+
+serial_api:
+  uart_id: serial_api_uart
+  # What HELLO reports; the room already declares firmware_version (required by modules/core.yaml).
+  firmware_version: ${firmware_version}
